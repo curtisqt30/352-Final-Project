@@ -1,23 +1,54 @@
 import socket
 import threading
+import os
 
 PORT_NUMBER = 5000
+
+# Dictionary to store files and their peers
+file_index = {}
 
 # Handles communication with a single client
 def handle_client(cliSock, cliInfo):
     print(f"Connection established with {cliInfo}")
-
-    try
+    try:
         while True:
-            # receive data or message
-            data = cliSock.recv(1024)
+            # Receive data or message
+            data = cliSock.recv(1024).decode()
             if not data:
                 break
-            print(f"Received from {cliInfo}: {data.decode()}")
-            # add more logic here?
-
+            
+            command, *args = data.split()
+            
+            if command == "INDEX":
+                filename = args[0]
+                peer_ip = cliInfo[0]
+                peer_port = int(args[1])  # Expected as argument
+                
+                if filename not in file_index:
+                    file_index[filename] = []
+                file_index[filename].append((peer_ip, peer_port))
+                cliSock.send(b"File indexed successfully.")
+            
+            elif command == "SEARCH":
+                filename = args[0]
+                peers = file_index.get(filename, [])
+                cliSock.send(str(peers).encode())
+            
+            elif command == "SEND_FILE":
+                filename = args[0]
+                if os.path.exists(filename):
+                    cliSock.send(b"OK")
+                    with open(filename, 'rb') as file:
+                        while chunk := file.read(1024):
+                            cliSock.send(chunk)
+                    print(f"Sent {filename} to {cliInfo}")
+                else:
+                    cliSock.send(b"File not found.")
+            else:
+                cliSock.send(b"Invalid command.")
+    
     except Exception as e:
-        print(f"An error occured with client {cliInfo}: {e}")
+        print(f"An error occurred with client {cliInfo}: {e}")
     finally:
         print(f"Closing connection with {cliInfo}")
         cliSock.close()
@@ -25,29 +56,20 @@ def handle_client(cliSock, cliInfo):
 # Starts server and listens for incoming connections
 def start_server():
     print("Server started")
-    
-    # Socket default values, AF_NET = IPv4 and SOCK_STREAM = TCP
     serverSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    
-    # Bind the socket to IP 0.0.0.0 and the port
     serverSock.bind(('0.0.0.0', PORT_NUMBER))
-    
-    # Listen for incoming connections max 2
     serverSock.listen(2)
     print(f"Server listening on {PORT_NUMBER}")
     
     try:
         while True:
-            # Accept incoming connection
             cliSock, cliInfo = serverSock.accept()
-            # Create a new thread to handle client
-            client_thread = threading.thread(target=handle_client, args=(cliSock, cliInfo))
+            client_thread = threading.Thread(target=handle_client, args=(cliSock, cliInfo))
             client_thread.start()
+    
     except KeyboardInterrupt:
         print("\nServer shutting down.")    
-    
     finally:
-        # Close socket afterwards 
         serverSock.close()
 
 if __name__ == "__main__":
