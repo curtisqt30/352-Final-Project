@@ -1,5 +1,32 @@
 import socket
 import os
+# from Crypto.Cipher import AES
+# from Crypto.Hash import SHA256
+
+
+def client_decrypt_file():
+    pass
+    # key = b'sixteen byte key'
+    # cipher = AES.new(key, AES.MODE_EAX, nonce=nonce)
+    # plaintext = cipher.decrypt(ciphertext)
+    # try:
+    #   cipher.verify(tag)
+    #   printf("Message is verified: ", plaintext)
+    # except ValueError:
+    #   print("key is incorrect or message is corrupted")
+
+def client_encrypt_file():
+    pass
+    # key = b'sixteen byte key'
+    # cipher = AES.new(key, AES.MODE_EAX)
+    #
+    # nonce = cipher.nonce
+    # cipher, tag = cipher.encrypt_and_digest(data)
+    
+def client_hash_file():
+    pass
+    
+def client_public_key():
 
 def start_client():
     cliSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
