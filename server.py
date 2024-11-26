@@ -4,19 +4,21 @@ import os
 from encryption_util import (
     aes_encrypt_file,
     aes_decrypt_file,
+    generate_AES_key,
     hash_file,
-    generate_AES,
-    generate_RSA,
-    generate_DSA,
-    sign_data_rsa,
-    verify_signature_rsa,
-    sign_data_dsa,
-    verify_signature_dsa,
+    store_password,
+    load_stored_password,
+    verify_password,
+    generate_RSA_keypair,
     rsa_encrypt,
     rsa_decrypt,
-    hash_password,
-    verify_password,
-    generate_salt
+    sign_data_rsa,
+    verify_signature_rsa,
+    generate_DSA_keypair,
+    sign_data_dsa,
+    verify_signature_dsa,
+    save_key,
+    load_key
 )
 
 # Port Number 

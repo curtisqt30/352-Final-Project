@@ -9,4 +9,4 @@ To run this project, you will need the following Python libraries:
 You can install these dependencies by running:
 
 ```bash
-pip install tkinter pycryptodome
+pip3 install tkinter bcrypt pycryptodome

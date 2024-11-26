@@ -4,6 +4,7 @@ from Crypto.Signature import pkcs1_15, DSS  # For RSA and DSA signature
 from Crypto.Cipher import PKCS1_OAEP, AES  # For RSA and AES encryption
 from Crypto.Hash import SHA256  # For hashing data (SHA-256)
 from Crypto.Random import get_random_bytes  # For random bytes
+import bcrypt # For password and salting
 
 # Standard Libraries
 import os  # For file operations
@@ -11,6 +12,8 @@ import hashlib  # For hashing
 
 # AES Functions
 def aes_encrypt_file(file_path, key):
+    iv = get_random_bytes(AES.block_size)
+    cipher = AES.new(key, AES.MODE_CBC, iv)
     pass
 
 def aes_decrypt_file(encrypted_file_path, key):
@@ -23,14 +26,26 @@ def generate_AES_key():
 def hash_file(file_path):
     pass
 
-def generate_salt():
-    pass
+# Password functions
+def store_password(username, password, filename="db.txt"): # Generate a salt and hash the password
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(password.encode(), salt)
+    with open(filename, "a") as file:
+        file.write(f"{username},{hashed_password.decode()},{salt.decode()}\n")
 
-def hash_password(password, salt):
-    pass
+def load_stored_password(username, filename="db.txt"): # Read the file and retrieve the stored hash and salt for the username
+    with open(filename, "r") as file:
+        for line in file:
+            stored_username, stored_hash, stored_salt = line.strip().split(",")
+            if stored_username == username:
+                return stored_hash.encode(), stored_salt.encode()
+    return None, None 
 
-def verify_password(password, salt, stored_hash):
-    pass
+def verify_password(username, password, filename="db.txt"):  # Load the stored hash and salt, then verify the password
+    stored_hash, stored_salt = load_stored_password(username, filename)
+    if stored_hash is None:
+        return False 
+    return bcrypt.checkpw(password.encode(), stored_hash)
 
 # RSA Functions
 def generate_RSA_keypair(key_size=2048):
