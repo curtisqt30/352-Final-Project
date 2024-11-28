@@ -26,11 +26,21 @@ client = Client(server_ip="127.0.0.1", port_number=5000)
 # Initialize main Tkinter window
 m = tk.Tk()
 m.title("Secure File Sharing System")
-m.geometry("600x400")
+
+# Center the window
+screen_width = m.winfo_screenwidth()
+screen_height = m.winfo_screenheight()
+window_width = 600
+window_height = 400
+position_top = int(screen_height / 2 - window_height / 2)
+position_right = int(screen_width / 2 - window_width / 2)
+
+# Set the position and size
+m.geometry(f'{window_width}x{window_height}+{position_right}+{position_top}')
 
 def connect_to_server():
     try:
-        client.connect() # call connect function from client class
+        client.connect()  # call connect function from client class
         messagebox.showinfo("Connection Status", "Connected to server!")
     except Exception as e:
         messagebox.showerror("Connection Error", f"Failed to connect: {e}")
@@ -38,29 +48,66 @@ def connect_to_server():
 def login():
     username = username_entry.get()
     password = password_entry.get()
+    
     if verify_password(username, password):
         messagebox.showinfo("Login", "Login successful!")
+        
+        # Close the login window
+        m.destroy()  
+        
+        main_window = tk.Tk()
+        main_window.title("Secure File Sharing")
+        main_window.geometry("600x400")
+
+        upload_button = tk.Button(main_window, text="Upload File", command=upload_file)
+        upload_button.pack(pady=20)
+        
+        transfer_button = tk.Button(main_window, text="Start Transfer", command=start_transfer)
+        transfer_button.pack(pady=5)
+        
+        search_button = tk.Button(main_window, text="Search Files", command=search_file)
+        search_button.pack(pady=5)
+        
+        exit_button = tk.Button(main_window, text="Exit", command=exit_application)
+        exit_button.pack(pady=5)
+
+        # Start the main window loop
+        main_window.mainloop()
+        
     else:
         messagebox.showerror("Login", "Invalid credentials.")
+
         
 def create_account():
     # Create a new window for account creation
     account_window = tk.Toplevel(m)  
     account_window.title("Create Account")
-    account_window.geometry("400x300")
+    
+    # Center the "Create Account" window
+    screen_width = m.winfo_screenwidth()
+    screen_height = m.winfo_screenheight()
+    account_window_width = 400
+    account_window_height = 300
+    position_top = int(screen_height / 2 - account_window_height / 2)
+    position_right = int(screen_width / 2 - account_window_width / 2)
+    
+    # Set the position and size for account creation window
+    account_window.geometry(f'{account_window_width}x{account_window_height}+{position_right}+{position_top}')
 
     def submit_account():
         username = new_username_entry.get()
         password = new_password_entry.get()
         if username and password:
             try:
-                store_password(username, password)  # Save the credentials securely
+                store_password(username, password) 
                 messagebox.showinfo("Account Creation", "Account created successfully!")
-                account_window.destroy()  # Close the account creation window
+                account_window.destroy() 
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to create account: {e}")
-        else:
-            messagebox.showwarning("Input Error", "Please fill in both fields.")
+                account_window.destroy() 
+        account_window.withdraw()  
+        messagebox.showwarning("Input Error", "Please fill in both fields.")
+        account_window.deiconify()  
 
     # Username Entry
     new_username_label = tk.Label(account_window, text="New Username:")
