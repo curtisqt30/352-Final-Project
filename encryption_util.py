@@ -26,7 +26,6 @@ def aes_encrypt_file(file_path, key):
     with open(encrypted_file_path, 'wb') as enc_file:
         enc_file.write(iv)
         enc_file.write(ciphertext)
-    
     return encrypted_file_path
 
 def aes_decrypt_file(encrypted_file_path, key):
@@ -43,9 +42,7 @@ def aes_decrypt_file(encrypted_file_path, key):
     decrypted_file_path = encrypted_file_path[:-4]
     with open(decrypted_file_path, 'wb') as dec_file:
         dec_file.write(decrypted_data)
-
     return decrypted_file_path
-
 
 def generate_AES_key():
    key = get_random_bytes(32)
@@ -65,24 +62,28 @@ def hash_file(file_path):
         return f"An error occurred: {e}"
 
 # Password functions
-def store_password(username, password, filename="db.txt"): # Generate a salt and hash the password
-    salt = bcrypt.gensalt()
-    hashed_password = bcrypt.hashpw(password.encode(), salt)
+def store_password(username, password, filename="db.txt"):
+    hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     with open(filename, "a") as file:
-        file.write(f"{username},{hashed_password.decode()},{salt.decode()}\n")
+        file.write(f"{username}:{hashed_password}\n")
 
-def load_stored_password(username, filename="db.txt"): # Read the file and retrieve the stored hash and salt for the username
-    with open(filename, "r") as file:
-        for line in file:
-            stored_username, stored_hash, stored_salt = line.strip().split(",")
-            if stored_username == username:
-                return stored_hash.encode(), stored_salt.encode()
-    return None, None 
+def load_stored_password(username, filename="db.txt"):
+    try:
+        with open(filename, "r") as file:
+            for line in file:
+                stored_username, stored_hash = line.strip().split(":")
+                if stored_username == username:
+                    return stored_hash.encode()
+    except FileNotFoundError:
+        print("Password file not found.")
+    except ValueError:
+        print("Invalid password file format.")
+    return None
 
-def verify_password(username, password, filename="db.txt"):  # Load the stored hash and salt, then verify the password
-    stored_hash, stored_salt = load_stored_password(username, filename)
+def verify_password(username, password, filename="db.txt"):
+    stored_hash = load_stored_password(username, filename)
     if stored_hash is None:
-        return False 
+        return False
     return bcrypt.checkpw(password.encode(), stored_hash)
 
 # RSA Functions

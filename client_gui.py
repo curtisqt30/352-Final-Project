@@ -1,6 +1,25 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from client import Client
+from encryption_util import (
+    aes_encrypt_file,
+    aes_decrypt_file,
+    generate_AES_key,
+    hash_file,
+    store_password,
+    load_stored_password,
+    verify_password,
+    generate_RSA_keypair,
+    rsa_encrypt,
+    rsa_decrypt,
+    sign_data_rsa,
+    verify_signature_rsa,
+    generate_DSA_keypair,
+    sign_data_dsa,
+    verify_signature_dsa,
+    save_key,
+    load_key
+)
 
 client = Client(server_ip="127.0.0.1", port_number=5000)
 
@@ -26,20 +45,9 @@ def login():
         
 def create_account():
     # Create a new window for account creation
-    account_window = tk.Toplevel(m)  # Use Toplevel to create a new window
+    account_window = tk.Toplevel(m)  
     account_window.title("Create Account")
     account_window.geometry("400x300")
-
-    # Add widgets for account creation
-    new_username_label = tk.Label(account_window, text="New Username:")
-    new_username_label.pack(pady=5)
-    new_username_entry = tk.Entry(account_window)
-    new_username_entry.pack(pady=5)
-
-    new_password_label = tk.Label(account_window, text="New Password:")
-    new_password_label.pack(pady=5)
-    new_password_entry = tk.Entry(account_window, show="*")
-    new_password_entry.pack(pady=5)
 
     def submit_account():
         username = new_username_entry.get()
@@ -54,30 +62,22 @@ def create_account():
         else:
             messagebox.showwarning("Input Error", "Please fill in both fields.")
 
-    # Add the submit button
-    submit_button = tk.Button(account_window, text="Create Account", command=submit_account)
-    submit_button.pack(pady=20)
-
-
     # Username Entry
     new_username_label = tk.Label(account_window, text="New Username:")
     new_username_label.pack(pady=5)
     new_username_entry = tk.Entry(account_window)
     new_username_entry.pack(pady=5)
 
-    # Password Entry (Masked Input)
+    # Password Entry 
     new_password_label = tk.Label(account_window, text="New Password:")
     new_password_label.pack(pady=5)
     new_password_entry = tk.Entry(account_window, show="*")
     new_password_entry.pack(pady=5)
 
-    # Submit Button
-    submit_button = tk.Button(account_window, text="Submit", command=submit_account)
+    # Add the submit button
+    submit_button = tk.Button(account_window, text="Create Account", command=submit_account)
     submit_button.pack(pady=20)
 
-    # Cancel Button
-    cancel_button = tk.Button(account_window, text="Cancel", command=account_window.destroy)
-    cancel_button.pack(pady=5)
 
 def upload_file():
     pass
