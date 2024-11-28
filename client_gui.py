@@ -23,6 +23,61 @@ def login():
         messagebox.showinfo("Login", "Login successful!")
     else:
         messagebox.showerror("Login", "Invalid credentials.")
+        
+def create_account():
+    # Create a new window for account creation
+    account_window = tk.Toplevel(m)  # Use Toplevel to create a new window
+    account_window.title("Create Account")
+    account_window.geometry("400x300")
+
+    # Add widgets for account creation
+    new_username_label = tk.Label(account_window, text="New Username:")
+    new_username_label.pack(pady=5)
+    new_username_entry = tk.Entry(account_window)
+    new_username_entry.pack(pady=5)
+
+    new_password_label = tk.Label(account_window, text="New Password:")
+    new_password_label.pack(pady=5)
+    new_password_entry = tk.Entry(account_window, show="*")
+    new_password_entry.pack(pady=5)
+
+    def submit_account():
+        username = new_username_entry.get()
+        password = new_password_entry.get()
+        if username and password:
+            try:
+                store_password(username, password)  # Save the credentials securely
+                messagebox.showinfo("Account Creation", "Account created successfully!")
+                account_window.destroy()  # Close the account creation window
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to create account: {e}")
+        else:
+            messagebox.showwarning("Input Error", "Please fill in both fields.")
+
+    # Add the submit button
+    submit_button = tk.Button(account_window, text="Create Account", command=submit_account)
+    submit_button.pack(pady=20)
+
+
+    # Username Entry
+    new_username_label = tk.Label(account_window, text="New Username:")
+    new_username_label.pack(pady=5)
+    new_username_entry = tk.Entry(account_window)
+    new_username_entry.pack(pady=5)
+
+    # Password Entry (Masked Input)
+    new_password_label = tk.Label(account_window, text="New Password:")
+    new_password_label.pack(pady=5)
+    new_password_entry = tk.Entry(account_window, show="*")
+    new_password_entry.pack(pady=5)
+
+    # Submit Button
+    submit_button = tk.Button(account_window, text="Submit", command=submit_account)
+    submit_button.pack(pady=20)
+
+    # Cancel Button
+    cancel_button = tk.Button(account_window, text="Cancel", command=account_window.destroy)
+    cancel_button.pack(pady=5)
 
 def upload_file():
     pass
@@ -42,15 +97,19 @@ username_label.pack(pady=5)
 username_entry = tk.Entry(m)
 username_entry.pack(pady=5)
 
-# Password Entry (Masked Input)
+# Password Entry 
 password_label = tk.Label(m, text="Password:")
 password_label.pack(pady=5)
-password_entry = tk.Entry(m, show="*")  # Mask the input with '*'
+password_entry = tk.Entry(m, show="*") 
 password_entry.pack(pady=5)
 
 # Login Button
 login_button = tk.Button(m, text="Login", command=login)
 login_button.pack(pady=20)
+
+# Create Account Button
+create_account_button = tk.Button(m, text="Create Account", command=create_account)
+create_account_button.pack(pady=5)
 
 # Exit Button
 exit_button = tk.Button(m, text="Exit", command=exit_application)

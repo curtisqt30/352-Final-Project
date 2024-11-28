@@ -1,30 +1,68 @@
 # Cryptographic Algorithms
 from Crypto.PublicKey import RSA, DSA  # For RSA and DSA key pair generation
-from Crypto.Signature import pkcs1_15, DSS  # For RSA and DSA signature
+from Crypto.Signature import pkcs1_15, DSS  # for RSA and DSA signature
 from Crypto.Cipher import PKCS1_OAEP, AES  # For RSA and AES encryption
-from Crypto.Hash import SHA256  # For hashing data (SHA-256)
+from Crypto.Hash import SHA256  # for hashing data (SHA-256)
 from Crypto.Random import get_random_bytes  # For random bytes
+from Crypto.Util.Padding import pad, unpad
 import bcrypt # For password and salting
 
 # Standard Libraries
-import os  # For file operations
-import hashlib  # For hashing 
+import os  # for file operations
+import hashlib  # for hashing 
 
-# AES Functions
+# AES Functions using Cipher blcok chaining mode
 def aes_encrypt_file(file_path, key):
     iv = get_random_bytes(AES.block_size)
     cipher = AES.new(key, AES.MODE_CBC, iv)
-    pass
+    
+    # read file and encrypt
+    with open(file_path, 'rb') as file:
+        plaintext = file.read()
+        ciphertext = cipher.encrypt(pad(plaintext, AES.block_size))
+    
+    # save file
+    encrypted_file_path = file_path + ".enc"
+    with open(encrypted_file_path, 'wb') as enc_file:
+        enc_file.write(iv)
+        enc_file.write(ciphertext)
+    
+    return encrypted_file_path
 
 def aes_decrypt_file(encrypted_file_path, key):
-    pass
+    # Read encrypted file
+    with open(encrypted_file_path, 'rb') as enc_file:
+        iv = enc_file.read(AES.block_size) 
+        ciphertext = enc_file.read() 
+
+    # Decrypt ciphertext
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    decrypted_data = unpad(cipher.decrypt(ciphertext), AES.block_size)
+
+    # Save decrypted file
+    decrypted_file_path = encrypted_file_path[:-4]
+    with open(decrypted_file_path, 'wb') as dec_file:
+        dec_file.write(decrypted_data)
+
+    return decrypted_file_path
+
 
 def generate_AES_key():
-    pass
+   key = get_random_bytes(32)
+   return key
 
-# General Hashing
+# General Hashing SHA 256
 def hash_file(file_path):
-    pass
+    sha256_hash = hashlib.sha256()
+    try:
+        with open(file_path, 'rb') as file:
+            for byte_block in iter(lambda: file.read(4096), b""): 
+                sha256_hash.update(byte_block)
+            return sha256_hash.hexdigest()
+    except FileNotFoundError:
+        return "File Not Found"
+    except Exception as e:
+        return f"An error occurred: {e}"
 
 # Password functions
 def store_password(username, password, filename="db.txt"): # Generate a salt and hash the password
