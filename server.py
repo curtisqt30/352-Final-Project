@@ -71,28 +71,23 @@ def handle_client(cliSock, cliInfo):
             elif command == "INDEX":
                 # Command to index the file with peer info
                 filename = args[0]
-                file_path = args[1]  # Full path of the file
                 peer_ip = cliInfo[0]
-                peer_port = int(args[2])
+                peer_port = int(args[1])
 
                 # Lock the file index for thread safety
                 with file_index_lock:
                     if filename not in file_index:
                         file_index[filename] = []
-                    # Store the file path and peer info
-                    file_index[filename].append((file_path, peer_ip, peer_port))
+                    file_index[filename].append((peer_ip, peer_port))
 
                 cliSock.send(b"File indexed successfully.")
 
             elif command == "SEARCH":
-                # Command to search for a file and return its full path
+                # Command to search for a file and return peers
                 filename = args[0]
                 with file_index_lock:
-                    # Fetch all entries associated with the filename
-                    results = file_index.get(filename, [])
-                    # Return just the file paths (no need for peer info in search results)
-                    file_paths = [file_info[0] for file_info in results]
-                cliSock.send(str(file_paths).encode())
+                    peers = file_index.get(filename, [])
+                cliSock.send(str(peers).encode())
 
             elif command == "SEND_FILE":
                 # Command to send the requested file to the client
