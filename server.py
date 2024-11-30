@@ -42,26 +42,57 @@ def handle_client(cliSock, cliInfo):
 
             command, *args = data.split()
 
-            if command == "INDEX":
+            if command == "LOGIN":
+                username = args[0]
+                password = args[1]
+
+                # Authenticate the user based on hashed password
+                if verify_password(username, password):
+                    cliSock.send(b"LOGIN_SUCCESS")
+                    print(f"User {username} logged in successfully.")
+                else:
+                    cliSock.send(b"LOGIN_FAILURE")
+                    print(f"Failed login attempt for {username}.")
+
+            elif command == "REGISTER":
+                username = args[0]
+                password = args[1]
+
+                # Check if username already exists
+                if load_stored_password(username):
+                    cliSock.send(b"USERNAME_TAKEN")
+                    print(f"Registration failed: Username {username} already taken.")
+                else:
+                    # If username does not exist, register the user
+                    store_password(username, password)
+                    cliSock.send(b"REGISTER_SUCCESS")
+                    print(f"User {username} registered successfully.")
+
+            elif command == "INDEX":
                 # Command to index the file with peer info
                 filename = args[0]
+                file_path = args[1]  # Full path of the file
                 peer_ip = cliInfo[0]
-                peer_port = int(args[1])
+                peer_port = int(args[2])
 
                 # Lock the file index for thread safety
                 with file_index_lock:
                     if filename not in file_index:
                         file_index[filename] = []
-                    file_index[filename].append((peer_ip, peer_port))
+                    # Store the file path and peer info
+                    file_index[filename].append((file_path, peer_ip, peer_port))
 
                 cliSock.send(b"File indexed successfully.")
 
             elif command == "SEARCH":
-                # Command to search for a file and return peers
+                # Command to search for a file and return its full path
                 filename = args[0]
                 with file_index_lock:
-                    peers = file_index.get(filename, [])
-                cliSock.send(str(peers).encode())
+                    # Fetch all entries associated with the filename
+                    results = file_index.get(filename, [])
+                    # Return just the file paths (no need for peer info in search results)
+                    file_paths = [file_info[0] for file_info in results]
+                cliSock.send(str(file_paths).encode())
 
             elif command == "SEND_FILE":
                 # Command to send the requested file to the client

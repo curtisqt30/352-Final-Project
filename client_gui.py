@@ -125,17 +125,36 @@ def create_account():
     submit_button = tk.Button(account_window, text="Create Account", command=submit_account)
     submit_button.pack(pady=20)
 
-
 def upload_file():
-    pass
+    # Open a file dialog to select a file to upload
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        try:
+            client.handle_index(file_path, 5001)  # test port
+            messagebox.showinfo("Upload File", f"File {file_path} indexed successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to upload file: {e}")
 
 def search_file():
-    pass
+    filename = filedialog.askstring("Search File", "Enter the filename to search:")
+    if filename:
+        try:
+            client.handle_search(filename)  # Search the file
+        except Exception as e:
+            messagebox.showerror("Error", f"Search failed: {e}")
 
 def start_transfer():
-    pass
+    filename = filedialog.askopenfilename()
+    if filename:
+        peer_ip = "127.0.0.1"  # test peer IP for direct file sharing
+        peer_port = 5002        # test peer port
+        try:
+            client.request_file_from_peer(peer_ip, peer_port, filename)
+        except Exception as e:
+            messagebox.showerror("Error", f"Transfer failed: {e}")
 
 def exit_application():
+    client.disconnect()
     m.quit()
 
 # Username Entry
