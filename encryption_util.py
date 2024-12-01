@@ -9,7 +9,9 @@ import bcrypt # For password and salting
 
 # Standard Libraries
 import os  # for file operations
-import hashlib  # for hashing 
+import hashlib  # for hashing
+import json
+import threading
 
 # AES Functions using Cipher blcok chaining mode
 def aes_encrypt_file(file_path, key):
@@ -62,12 +64,12 @@ def hash_file(file_path):
         return f"An error occurred: {e}"
 
 # Password functions
-def store_password(username, password, filename="db.txt"):
+def store_password(username, password, filename="db_pw.txt"):
     hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
     with open(filename, "a") as file:
         file.write(f"{username}:{hashed_password}\n")
 
-def load_stored_password(username, filename="db.txt"):
+def load_stored_password(username, filename="db_pw.txt"):
     try:
         with open(filename, "r") as file:
             for line in file:
@@ -80,11 +82,35 @@ def load_stored_password(username, filename="db.txt"):
         print("Invalid password file format.")
     return None
 
-def verify_password(username, password, filename="db.txt"):
+def verify_password(username, password, filename="db_pw.txt"):
     stored_hash = load_stored_password(username, filename)
     if stored_hash is None:
         return False
     return bcrypt.checkpw(password.encode(), stored_hash)
+    
+# File Path Database functions
+database_lock = threading.Lock()
+
+def load_database(filename="db_filepaths.txt"):
+    try:
+        with database_lock:
+            if not os.path.exists(filename):
+                return {"file_index": {}, "peers": {}}
+            with open(filename, "r") as db_file:
+                return json.load(db_file)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error loading database: {e}")
+        return {"file_index": {}, "peers": {}}
+
+def save_database(data, filename="db_filepaths.txt"):
+    try:
+        temp_file = filename + ".tmp"
+        with database_lock:
+            with open(temp_file, "w") as db_file:
+                json.dump(data, db_file, indent=4)
+            os.replace(temp_file, filename)
+    except OSError as e:
+        print(f"Error saving database: {e}")
 
 # RSA Functions
 def generate_RSA_keypair(key_size=2048):

@@ -18,24 +18,39 @@ from encryption_util import (
     sign_data_dsa,
     verify_signature_dsa,
     save_key,
-    load_key
+    load_key,
+    load_database,
+    save_database
 )
 
 # Port Number 
-PORT_NUMBER = 5000
+PORT_NUMBER = 55555
 
 # Dictionary to store files and their peers
 file_index = {}
 
-# Locks for thread safety when accessing the shared file_index
+# Dictionary to store peer list
+peers = {}
+
+# Locks for thread safety when accessing shared resources
 file_index_lock = threading.Lock()
+peer_list_lock = threading.Lock()
 
 # Handles communication with a single client
 def handle_client(cliSock, cliInfo):
     print(f"Connection established with {cliInfo}")
+    peer_ip, peer_port = cliInfo
+
     try:
+        # Load current database
+        database = load_database()
+
+        # Register the peer in the peer list
+        with peer_list_lock:
+            database["peers"][peer_ip] = peer_port
+            save_database(database)
+
         while True:
-            # Receive data or message
             data = cliSock.recv(1024).decode()
             if not data:
                 break
@@ -43,71 +58,64 @@ def handle_client(cliSock, cliInfo):
             command, *args = data.split()
 
             if command == "LOGIN":
-                username = args[0]
-                password = args[1]
-
-                # Authenticate the user based on hashed password
+                username, password = args
                 if verify_password(username, password):
                     cliSock.send(b"LOGIN_SUCCESS")
-                    print(f"User {username} logged in successfully.")
                 else:
                     cliSock.send(b"LOGIN_FAILURE")
-                    print(f"Failed login attempt for {username}.")
 
             elif command == "REGISTER":
-                username = args[0]
-                password = args[1]
-
-                # Check if username already exists
+                username, password = args
                 if load_stored_password(username):
                     cliSock.send(b"USERNAME_TAKEN")
-                    print(f"Registration failed: Username {username} already taken.")
                 else:
-                    # If username does not exist, register the user
                     store_password(username, password)
                     cliSock.send(b"REGISTER_SUCCESS")
-                    print(f"User {username} registered successfully.")
 
             elif command == "INDEX":
-                # Command to index the file with peer info
                 filename = args[0]
-                peer_ip = cliInfo[0]
-                peer_port = int(args[1])
-
-                # Lock the file index for thread safety
                 with file_index_lock:
-                    if filename not in file_index:
-                        file_index[filename] = []
-                    file_index[filename].append((peer_ip, peer_port))
-
+                    database = load_database()
+                    if filename not in database["file_index"]:
+                        database["file_index"][filename] = []
+                    database["file_index"][filename].append((peer_ip, peer_port))
+                    save_database(database)
                 cliSock.send(b"File indexed successfully.")
 
-            elif command == "SEARCH":
-                # Command to search for a file and return peers
-                filename = args[0]
+            elif command == "REQUEST_FILE_LIST":
                 with file_index_lock:
-                    peers = file_index.get(filename, [])
-                cliSock.send(str(peers).encode())
+                    database = load_database()
+                    file_list = str(list(database["file_index"].keys()))
+                cliSock.send(file_list.encode())
+
+
+            elif command == "LIST_PEERS":
+                with peer_list_lock:
+                    database = load_database()
+                    peer_list = str(database["peers"])
+                cliSock.send(peer_list.encode())
 
             elif command == "SEND_FILE":
-                # Command to send the requested file to the client
                 filename = args[0]
-                if os.path.exists(filename):
-                    cliSock.send(b"OK")
-                    with open(filename, 'rb') as file:
-                        while chunk := file.read(1024):
-                            cliSock.send(chunk)
-                    print(f"Sent {filename} to {cliInfo}")
-                else:
-                    cliSock.send(b"File not found.")
+                encrypted_file = aes_encrypt_file(filename, generate_AES_key())
+                with open(encrypted_file, 'rb') as file:
+                    while chunk := file.read(1024):
+                        cliSock.send(chunk)
+                os.remove(encrypted_file)
 
             else:
                 cliSock.send(b"Invalid command.")
 
     except Exception as e:
-        print(f"An error occurred with client {cliInfo}: {e}")
+        print(f"Error with client {cliInfo}: {e}")
+
     finally:
-        print(f"Closing connection with {cliInfo}")
+        with peer_list_lock:
+            database = load_database()
+            if peer_ip in database["peers"]:
+                del database["peers"][peer_ip]
+                save_database(database)
+        print(f"Connection closed with {cliInfo}")
         cliSock.close()
 
 # Starts server and listens for incoming connections
