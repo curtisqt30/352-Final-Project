@@ -50,7 +50,7 @@ def generate_AES_key():
    key = get_random_bytes(32)
    return key
 
-# General Hashing SHA 256
+# General Hashing using SHA 256
 def hash_file(file_path):
     sha256_hash = hashlib.sha256()
     try:
