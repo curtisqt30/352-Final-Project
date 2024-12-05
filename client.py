@@ -3,6 +3,7 @@ import os
 import threading
 import pwinput
 from tqdm import tqdm
+import json
 
 from encryption_util import (
     aes_encrypt_file,
@@ -63,12 +64,17 @@ class Client:
             print(f"Error sending command: {e}")
             return f"Error: {e}"
 
-    def handle_index(self, filename, port):
+    def handle_index(self, filename, port, username):
+        # Check if the file exists
         if not os.path.exists(filename):
             print(f"File {filename} doesn't exist.")
             return
-        command = f"INDEX {filename} {port}"
+
+        # Send the command to index the file with the username and port
+        command = f"INDEX {filename} {username} {port}"
         response = self.send_command(command)
+
+        # Print the response from the server
         if response:
             print(f"Indexing response: {response}")
 
@@ -76,46 +82,59 @@ class Client:
         command = "LIST_PEERS"
         response = self.send_command(command)
         if response:
-            print(f"Active peers: {response}")
+            peers = response.split(",")
+            if not peers:
+                print("No active peers found.")
+            else:
+                print("Active peers:")
+                for peer in peers:
+                    ip, port = peer.split(":")
+                    print(f"IP: {ip}, Port: {port}")
 
     def list_files(self):
         command = "LIST_FILES" 
         response = self.send_command(command)
         if response:
-            print(f"Available files: {response}")
+            try:
+                file_list = eval(response)
+                print("Available files:")
+                for file_entry in file_list:
+                    print(f"File: {file_entry['filename']}")
+                    for peer in file_entry['peers']:
+                        print(f"  - Offered by: {peer[0]}:{peer[1]}")
+            except Exception as e:
+                print(f"Error processing file list: {e}")
 
     def request_file_from_peer(self, peer_ip, peer_port, filename):
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
-                    peer_sock.connect((peer_ip, peer_port))
-                    peer_sock.send(f"REQUEST {filename}".encode())
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
+                peer_sock.connect((peer_ip, peer_port))
+                peer_sock.send(f"REQUEST {filename}".encode())
+                
+                # Get the file size first to display a progress bar
+                peer_sock.send("GET_SIZE".encode())
+                file_size = int(peer_sock.recv(1024).decode())  # Receive the size of the file
+
+                with open(f"downloaded_{filename}", "wb") as f:
+                    print(f"Downloading {filename} from {peer_ip}:{peer_port}...")
                     
-                    # Get the file size first to display a progress bar
-                    peer_sock.send("GET_SIZE".encode())
-                    file_size = int(peer_sock.recv(1024).decode())  # Receive the size of the file
+                    # Initialize the tqdm progress bar
+                    with tqdm(total=file_size, unit="B", unit_scale=True) as pbar:
+                        total_received = 0
+                        while True:
+                            data = peer_sock.recv(1024)
+                            if not data:
+                                break
+                            f.write(data)
+                            total_received += len(data)
+                            pbar.update(len(data))  # Update progress bar 
 
-                    with open(f"downloaded_{filename}", "wb") as f:
-                        print(f"Downloading {filename} from {peer_ip}:{peer_port}...")
-                        
-                        # Initialize the tqdm progress bar
-                        with tqdm(total=file_size, unit="B", unit_scale=True) as pbar:
-                            total_received = 0
-                            while True:
-                                data = peer_sock.recv(1024)
-                                if not data:
-                                    break
-                                f.write(data)
-                                total_received += len(data)
-                                pbar.update(len(data))  # Update progress bar 
-
-                        print(f"\nFile {filename} downloaded successfully.")
-            except Exception as e:
-                print(f"Failed to request file from peer: {e}")
+                    print(f"\nFile {filename} downloaded successfully.")
+        except Exception as e:
+            print(f"Failed to request file from peer: {e}")
 
 if __name__ == "__main__":
-    # Prompt user for server IP
-    server_ip = input("Enter the server IP address (default 127.0.0.1): ").strip() or "127.0.0.1"
- 
+    server_ip = "127.0.0.1"
     port_number = 55555
     
     client = Client(server_ip=server_ip, port_number=port_number)
@@ -136,7 +155,7 @@ if __name__ == "__main__":
             password = pwinput.pwinput(prompt="Enter your password: ") 
             if client.login(username, password):
                 print("Login successful!")
-                # Once logged in, proceed with actions
+                # Once logged in, show possible operations
                 while True:
                     print("\nChoose an action:")
                     print("[1] Upload file")
@@ -148,7 +167,7 @@ if __name__ == "__main__":
                     
                     if action == "1":  # Upload file
                         filename = input("Enter file path to upload: ")
-                        client.handle_index(filename, 5001)
+                        client.handle_index(filename, 5001, username)
                     elif action == "2":  # List peers
                         client.list_peers()
                     elif action == "3":  # List files

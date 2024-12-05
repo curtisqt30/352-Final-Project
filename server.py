@@ -1,6 +1,10 @@
 import socket
-import threading
 import os
+import threading
+import pwinput
+from tqdm import tqdm
+import json
+
 from encryption_util import (
     aes_encrypt_file,
     aes_decrypt_file,
@@ -26,13 +30,10 @@ from encryption_util import (
 # Port Number 
 PORT_NUMBER = 55555
 
-# Dictionary to store files and their peers
-file_index = {}
+# Database loaded once at the start
+database = load_database()
 
-# Dictionary to store peer list
-peers = {}
-
-# Locks for thread safety when accessing shared resources
+# Locks for thread safety
 file_index_lock = threading.Lock()
 peer_list_lock = threading.Lock()
 
@@ -42,9 +43,6 @@ def handle_client(cliSock, cliInfo):
     peer_ip, peer_port = cliInfo
 
     try:
-        # Load current database
-        database = load_database()
-
         # Register the peer in the peer list
         with peer_list_lock:
             database["peers"][peer_ip] = peer_port
@@ -60,6 +58,11 @@ def handle_client(cliSock, cliInfo):
             if command == "LOGIN":
                 username, password = args
                 if verify_password(username, password):
+                    # Log the successful login
+                    with open("login_logs.txt", "a") as log_file:
+                        log_file.write(f"User {username} logged in from {peer_ip}:{peer_port}\n")
+                    print(f"User {username} logged in from {peer_ip}:{peer_port}")
+                    
                     cliSock.send(b"LOGIN_SUCCESS")
                 else:
                     cliSock.send(b"LOGIN_FAILURE")
@@ -73,27 +76,38 @@ def handle_client(cliSock, cliInfo):
                     cliSock.send(b"REGISTER_SUCCESS")
 
             elif command == "INDEX":
-                filename = args[0]
+                filename, username, port = args
+                if not os.path.exists(filename):
+                    cliSock.send(f"File {filename} not found.".encode())
+                    continue
+
+                # Add the file to the index database with the username, IP, and port
                 with file_index_lock:
-                    database = load_database()
                     if filename not in database["file_index"]:
                         database["file_index"][filename] = []
-                    database["file_index"][filename].append((peer_ip, peer_port))
+                    # Store the file
+                    database["file_index"][filename].append({
+                        "username": username,
+                        "ip": peer_ip,
+                        "port": port
+                    })
                     save_database(database)
+
                 cliSock.send(b"File indexed successfully.")
 
-            elif command == "REQUEST_FILE_LIST":
+            elif command == "LIST_FILES":
                 with file_index_lock:
-                    database = load_database()
-                    file_list = str(list(database["file_index"].keys()))
-                cliSock.send(file_list.encode())
-
+                    file_list = [
+                        {"filename": filename, "peers": database["file_index"][filename]}
+                        for filename in database["file_index"]
+                    ]
+                response = json.dumps(file_list) 
+                cliSock.send(response.encode())
 
             elif command == "LIST_PEERS":
                 with peer_list_lock:
-                    database = load_database()
-                    peer_list = str(database["peers"])
-                cliSock.send(peer_list.encode())
+                    peer_list = ",".join([f"{ip}:{port}" for ip, port in database["peers"]]) 
+                cliSock.send(peer_list.encode()) 
 
             elif command == "SEND_FILE":
                 filename = args[0]
@@ -111,7 +125,6 @@ def handle_client(cliSock, cliInfo):
 
     finally:
         with peer_list_lock:
-            database = load_database()
             if peer_ip in database["peers"]:
                 del database["peers"][peer_ip]
                 save_database(database)
