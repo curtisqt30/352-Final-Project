@@ -2,6 +2,8 @@ import socket
 import os
 import threading
 import pwinput
+from tqdm import tqdm
+
 from encryption_util import (
     aes_encrypt_file,
     aes_decrypt_file,
@@ -34,6 +36,8 @@ class Client:
             print(f"Connected to server {self.server_ip} on port {self.port_number}")
         except Exception as e:
             print(f"Failed to connect: {e}")
+            self.disconnect()  # Disconnect if connection fails
+            exit(1)  # Exit the program
 
     def login(self, username, password):
         command = f"LOGIN {username} {password}"
@@ -81,30 +85,44 @@ class Client:
             print(f"Available files: {response}")
 
     def request_file_from_peer(self, peer_ip, peer_port, filename):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
-                peer_sock.connect((peer_ip, peer_port))
-                peer_sock.send(f"REQUEST {filename}".encode())
-                with open(f"downloaded_{filename}", "wb") as f:
-                    print(f"Downloading {filename} from {peer_ip}:{peer_port}...")
-                    total_received = 0
-                    while True:
-                        data = peer_sock.recv(1024)
-                        if not data:
-                            break
-                        f.write(data)
-                        total_received += len(data)
-                        print(f"Downloaded {total_received} bytes", end="\r")
-                    print(f"\nFile {filename} downloaded successfully.")
-        except Exception as e:
-            print(f"Failed to request file from peer: {e}")
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
+                    peer_sock.connect((peer_ip, peer_port))
+                    peer_sock.send(f"REQUEST {filename}".encode())
+                    
+                    # Get the file size first to display a progress bar
+                    peer_sock.send("GET_SIZE".encode())
+                    file_size = int(peer_sock.recv(1024).decode())  # Receive the size of the file
+
+                    with open(f"downloaded_{filename}", "wb") as f:
+                        print(f"Downloading {filename} from {peer_ip}:{peer_port}...")
+                        
+                        # Initialize the tqdm progress bar
+                        with tqdm(total=file_size, unit="B", unit_scale=True) as pbar:
+                            total_received = 0
+                            while True:
+                                data = peer_sock.recv(1024)
+                                if not data:
+                                    break
+                                f.write(data)
+                                total_received += len(data)
+                                pbar.update(len(data))  # Update progress bar 
+
+                        print(f"\nFile {filename} downloaded successfully.")
+            except Exception as e:
+                print(f"Failed to request file from peer: {e}")
 
 if __name__ == "__main__":
-    client = Client(server_ip="127.0.0.1", port_number=55555)
-    client.connect()
+    # Prompt user for server IP
+    server_ip = input("Enter the server IP address (default 127.0.0.1): ").strip() or "127.0.0.1"
+ 
+    port_number = 55555
+    
+    client = Client(server_ip=server_ip, port_number=port_number)
+    client.connect()  # If connection fails, exit
 
     while True:
-        # Display a clearer UI with numbered options
+        # Display numbered options
         print("\nSelect an option:")
         print("[1] Login")
         print("[2] Register")
@@ -153,8 +171,7 @@ if __name__ == "__main__":
             username = input("\nEnter your new username: ")
             password = pwinput.pwinput(prompt="Enter your new password: ")
             if client.register(username, password):
-                print("Registration successful!")
-                # After successful registration, go back to the menu
+                print("Registration successful! Now login.")
                 continue
             else:
                 print("Registration failed. Please try again.")
@@ -167,5 +184,3 @@ if __name__ == "__main__":
             print("Invalid option. Please enter a valid number (1, 2, or 3).")
     
     client.disconnect()
-
-
