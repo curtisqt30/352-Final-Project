@@ -133,7 +133,7 @@ def save_json(data, filename):
     except OSError as e:
         print(f"Error saving JSON file: {e}")
 
-# File Path Database functions
+# Database functions
 database_lock = threading.Lock()
 
 def load_database(filename="db_filepaths.json"):

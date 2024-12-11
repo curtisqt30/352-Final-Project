@@ -71,13 +71,7 @@ def handle_client(cliSock, cliInfo):
     print(f"Connection established with {cliInfo}")
     peer_ip, peer_port = cliInfo
     
-    
     try:
-        # Register the peer in the peer list
-        with peer_list_lock:
-            database["peers"][peer_ip] = peer_port
-            save_database(database)
-
         while True:
             data = cliSock.recv(1024).decode()
             if not data:
@@ -86,6 +80,10 @@ def handle_client(cliSock, cliInfo):
             command, *args = data.split()
 
             if command == "LOGIN":
+                if len(args) < 2:
+                    cliSock.send(b"INVALID_ARGUMENTS")
+                    continue
+
                 username, password = args
                 if verify_password(username, password):
                     # Pass: log the login attempt
@@ -94,6 +92,21 @@ def handle_client(cliSock, cliInfo):
                     print(f"User {username} logged in successfully from {peer_ip}:{peer_port}")
                     
                     cliSock.send(b"LOGIN_SUCCESS")
+
+                    # Register the peer with the correct username
+                    with peer_list_lock:
+                        # Ensure that the peer list for the IP is always a list
+                        if peer_ip not in database["peers"]:
+                            database["peers"][peer_ip] = []
+
+                        # Append the peer information
+                        database["peers"][peer_ip].append({
+                            "username": username,
+                            "ip": peer_ip,
+                            "port": peer_port
+                        })
+                        save_database(database)
+
                 else:
                     # Fail: Log the login attempt
                     with open("login_logs.txt", "a") as log_file:
@@ -103,6 +116,10 @@ def handle_client(cliSock, cliInfo):
                     cliSock.send(b"LOGIN_FAILURE")
 
             elif command == "REGISTER":
+                if len(args) < 2:
+                    cliSock.send(b"INVALID_ARGUMENTS")
+                    continue
+                
                 username, password = args
                 if load_stored_password(username):
                     cliSock.send(b"USERNAME_TAKEN")
@@ -111,6 +128,10 @@ def handle_client(cliSock, cliInfo):
                     cliSock.send(b"REGISTER_SUCCESS")
 
             elif command == "INDEX":
+                if len(args) < 2:
+                    cliSock.send(b"INVALID_ARGUMENTS")
+                    continue
+
                 filename, username, port = args
                 if not os.path.exists(filename):
                     cliSock.send(f"File {filename} not found.".encode())
@@ -131,6 +152,7 @@ def handle_client(cliSock, cliInfo):
                 cliSock.send(b"File indexed successfully.")
 
             elif command == "LIST_FILES":
+                # Send a list of files
                 with file_index_lock:
                     file_list = [
                         {"filename": filename, "peers": database["file_index"][filename]}
@@ -140,11 +162,21 @@ def handle_client(cliSock, cliInfo):
                 cliSock.send(response.encode())
 
             elif command == "LIST_PEERS":
+                # Send a list of peers with their usernames, IP, and port
                 with peer_list_lock:
-                    peer_list = ",".join([f"{ip}:{port}" for ip, port in database["peers"]]) 
-                cliSock.send(peer_list.encode()) 
+                    peer_list = []
+                    for ip, peers in database["peers"].items():
+                        for peer in peers:
+                            peer_list.append(f"Username: {peer['username']}, IP: {peer['ip']}, Port: {peer['port']}")
+                    response = "\n".join(peer_list)
+                cliSock.send(response.encode())
+
 
             elif command == "SEND_FILE":
+                if len(args) < 1:
+                    cliSock.send(b"INVALID_ARGUMENTS")
+                    continue
+
                 filename = args[0]
                 encrypted_file = aes_encrypt_file(filename, generate_AES_key())
                 with open(encrypted_file, 'rb') as file:
@@ -160,8 +192,15 @@ def handle_client(cliSock, cliInfo):
 
     finally:
         with peer_list_lock:
+            # Ensure that the peer list for the IP is a list before modifying it
             if peer_ip in database["peers"]:
-                del database["peers"][peer_ip]
+                # Remove the specific peer with the matching username
+                database["peers"][peer_ip] = [
+                    peer for peer in database["peers"][peer_ip] if peer["username"] != username
+                ]
+                # If no more peers exist for that IP, remove the IP entry
+                if not database["peers"][peer_ip]:
+                    del database["peers"][peer_ip]
                 save_database(database)
         print(f"Connection closed with {cliInfo}")
         cliSock.close()
@@ -172,9 +211,9 @@ def start_server(host, port):
     serverSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     serverSock.bind((host, port))
     serverSock.listen(5)  # Can handle 5 clients concurrently
-    print(f"Server listening on {host}:{port}...")
+    print(f"Server listening on {host}:{port}")
     
-    # load_sessions_from_file()
+    database = load_database()
     
     try:
         while True:

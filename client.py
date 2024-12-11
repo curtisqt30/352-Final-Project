@@ -87,21 +87,18 @@ class Client:
             print(f"Indexing response: {response}")
 
     def list_peers(self):
-        command = "LIST_PEERS"
-        response = self.send_command(command)
-        if response:
-            peers = response.split(",")
-            if not peers:
-                print("No active peers found.")
-            else:
-                print("Active peers:")
-                for peer in peers:
-                    ip, port = peer.split(":")
-                    print(f"IP: {ip}, Port: {port}")
+        response = self.send_command("LIST_PEERS")
+        print("Active peers:")
+        for peer in response.split("\n"):
+            try:
+                username, ip_port = peer.split(", IP:")
+                ip, port = ip_port.split(", Port:")
+                print(f"Username: {username.strip()}, IP: {ip.strip()}, Port: {port.strip()}")
+            except ValueError:
+                print(f"Invalid peer data: {peer}")
 
     def list_files(self):
-        command = "LIST_FILES" 
-        response = self.send_command(command)
+        response = self.send_command("LIST_FILES")
         if response:
             try:
                 file_list = eval(response)
