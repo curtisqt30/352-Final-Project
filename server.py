@@ -27,21 +27,47 @@ from encryption_util import (
     save_database
 )
 
-# Port Number 
-PORT_NUMBER = 55555
+# dictionary to store client information
+client_sessions = {}
 
 # Database loaded once at the start
 database = load_database()
+
+# Generate RSA keys for the server
+private_key, public_key = generate_RSA_keypair()
+print("\nServer RSA Private Key:")
+print(private_key.decode())
+print("\nServer RSA Public Key:")
+print(public_key.decode())
 
 # Locks for thread safety
 file_index_lock = threading.Lock()
 peer_list_lock = threading.Lock()
 
+def save_sessions_to_file():
+    with open('sessions.txt', 'w') as f:
+        for client_socket, session in client_sessions.items():
+            username, ip, port = session
+            f.write(f"{username},{ip}:{port}\n")
+            
+def load_sessions_from_file():
+    try:
+        with open('sessions.txt', 'r') as f:
+            for line in f.readlines():
+                username, session_info = line.strip().split(',')
+                ip, port = session_info.split(':')
+                client_sessions[username] = (username, ip, int(port))
+    except FileNotFoundError:
+        print("No saved sessions found.")
+
+
 # Handles communication with a single client
 def handle_client(cliSock, cliInfo):
     print(f"Connection established with {cliInfo}")
     peer_ip, peer_port = cliInfo
-
+    
+    #
+    
     try:
         # Register the peer in the peer list
         with peer_list_lock:
@@ -132,12 +158,14 @@ def handle_client(cliSock, cliInfo):
         cliSock.close()
 
 # Starts server and listens for incoming connections
-def start_server():
+def start_server(host, port):
     print("Server started")
     serverSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    serverSock.bind(('0.0.0.0', PORT_NUMBER))
+    serverSock.bind((host, port))
     serverSock.listen(5)  # Can handle 5 clients concurrently
-    print(f"Server listening on {PORT_NUMBER}")
+    print(f"Server listening on {host}:{port}...")
+    
+    load_sessions_from_file()
     
     try:
         while True:
@@ -152,4 +180,4 @@ def start_server():
         serverSock.close()
 
 if __name__ == "__main__":
-    start_server()
+    start_server("127.0.0.1", 55555)

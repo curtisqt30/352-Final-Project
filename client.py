@@ -4,6 +4,7 @@ import threading
 import pwinput
 from tqdm import tqdm
 import json
+import sys
 
 from encryption_util import (
     aes_encrypt_file,
@@ -134,6 +135,17 @@ class Client:
             print(f"Failed to request file from peer: {e}")
 
 if __name__ == "__main__":
+    
+    # Generate RSA keys for client
+    private_key, public_key = generate_RSA_keypair()
+    print("\nClient RSA Private Key:")
+    print(private_key.decode())
+    sys.stdout.flush()
+    print("\nClient RSA Public Key:")
+    print(public_key.decode())
+    sys.stdout.flush()
+    print("")
+    
     server_ip = "127.0.0.1"
     port_number = 55555
     

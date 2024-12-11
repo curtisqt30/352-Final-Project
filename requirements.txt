@@ -3,3 +3,4 @@ pycryptodome
 socket
 bcrypt
 pwinput
+tqdm
