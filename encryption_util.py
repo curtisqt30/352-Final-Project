@@ -6,6 +6,7 @@ from Crypto.Hash import SHA256  # for hashing data (SHA-256)
 from Crypto.Random import get_random_bytes  # For random bytes
 from Crypto.Util.Padding import pad, unpad
 import bcrypt # For password and salting
+import base64
 
 # Standard Libraries
 import os  # for file operations
@@ -114,19 +115,37 @@ def save_database(data, filename="db_filepaths.txt"):
 
 # RSA Functions
 def generate_RSA_keypair(key_size=2048):
-    pass
+    key = RSA.generate(key_size)
+    private_key = key.export_key()
+    public_key = key.publickey().export_key()
+    return private_key, public_key
 
 def rsa_encrypt(data, public_key):
-    pass
+    pub_key = RSA.import_key(public_key)
+    cipher = PKCS1_OAEP.new(pub_key)
+    encrypted = cipher.encrypt(data)
+    return encrypted
 
 def rsa_decrypt(ciphertext, private_key):
-    pass
+    priv_key = RSA.import_key(private_key)
+    cipher = PKCS1_OAEP.new(priv_key)
+    decrypted = cipher.decrypt(ciphertext)
+    return decrypted
 
 def sign_data_rsa(data, private_key):
-    pass
+    priv_key = RSA.import_key(private_key)
+    hash_obj = SHA256.new(data)
+    signature = pkcs1_15.new(priv_key).sign(hash_obj)
+    return signature
 
 def verify_signature_rsa(data, signature, public_key):
-    pass
+    pub_key = RSA.import_key(public_key)
+    hash_obj = SHA256.new(data)
+    try:
+        pkcs1_15.new(pub_key).verify(hash_obj, signature)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 # DSA Functions
 def generate_DSA_keypair(key_size=2048):
@@ -140,7 +159,16 @@ def verify_signature_dsa(data, signature, public_key):
 
 # Key Storage
 def save_key(key, file_path):
-    pass
+    try:
+        with open(file_path, 'wb') as file:
+            file.write(key)
+    except OSError as e:
+        print(f"Error saving key to {file_path}: {e}")
 
 def load_key(file_path):
-    pass
+    try:
+        with open(file_path, 'rb') as file:
+            return file.read()
+    except OSError as e:
+        print(f"Error loading key from {file_path}: {e}")
+        return None
