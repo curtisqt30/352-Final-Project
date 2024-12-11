@@ -8,6 +8,7 @@ from Crypto.Util.Padding import pad, unpad # For padding
 from Crypto.Util import Counter # For CTC mode
 import bcrypt # For password and salting
 import base64
+from datetime import datetime
 
 # Standard Libraries
 import os  # for file operations
@@ -206,5 +207,9 @@ def load_key(file_path="keys.json"):
     if data and file_path in data:
         return base64.b64decode(data[file_path])
     return None
+
+def get_current_timestamp():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 
 # Key Exchange functions
