@@ -2,56 +2,79 @@
 from Crypto.PublicKey import RSA, DSA  # For RSA and DSA key pair generation
 from Crypto.Signature import pkcs1_15, DSS  # for RSA and DSA signature
 from Crypto.Cipher import PKCS1_OAEP, AES  # For RSA and AES encryption
-from Crypto.Hash import SHA256  # for hashing data (SHA-256)
+from Crypto.Hash import SHA256, HMAC  # for hashig and HMAC
 from Crypto.Random import get_random_bytes  # For random bytes
-from Crypto.Util.Padding import pad, unpad
+from Crypto.Util.Padding import pad, unpad # For padding
+from Crypto.Util import Counter # For CTC mode
 import bcrypt # For password and salting
 import base64
 
 # Standard Libraries
 import os  # for file operations
 import hashlib  # for hashing
-import json
+import json # for database storage
 import threading
 
-# AES Functions using Cipher blcok chaining mode
+# AES Functions using CTR mode
 def aes_encrypt_file(file_path, key):
-    iv = get_random_bytes(AES.block_size)
-    cipher = AES.new(key, AES.MODE_CBC, iv)
+    # Generate a random nonce for counter
+    nonce = get_random_bytes(AES.block_size)
+    ctr = Counter.new(128, nonce=nonce) 
+
+    cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
     
-    # read file and encrypt
+    # Read file and encrypt
     with open(file_path, 'rb') as file:
         plaintext = file.read()
-        ciphertext = cipher.encrypt(pad(plaintext, AES.block_size))
+        ciphertext = cipher.encrypt(plaintext)
     
-    # save file
+    # Generate HMAC based on the ciphertex
+    hmac = HMAC.new(key, ciphertext, SHA256)
+    hmac_digest = hmac.digest()
+    
+    # Save the nonce (counter), ciphertext, and HMAC
     encrypted_file_path = file_path + ".enc"
     with open(encrypted_file_path, 'wb') as enc_file:
-        enc_file.write(iv)
+        enc_file.write(nonce)  # Store the nonce at the start
         enc_file.write(ciphertext)
+        enc_file.write(hmac_digest)  # Append the HMAC to end
+    
     return encrypted_file_path
 
 def aes_decrypt_file(encrypted_file_path, key):
     # Read encrypted file
     with open(encrypted_file_path, 'rb') as enc_file:
-        iv = enc_file.read(AES.block_size) 
-        ciphertext = enc_file.read() 
+        nonce = enc_file.read(AES.block_size)  # Read the nonce
+        ciphertext = enc_file.read(-32)  # Read the ciphertext 
+        stored_hmac = enc_file.read()  # Read the HMAC
+
+    # Verify HMAC
+    hmac = HMAC.new(key, ciphertext, SHA256)
+    try:
+        hmac.verify(stored_hmac)
+    except ValueError:
+        raise ValueError("HMAC verification failed. Data may have been tampered with.")
+    
+    # Create a counter from nonce
+    ctr = Counter.new(128, nonce=nonce)
 
     # Decrypt ciphertext
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    decrypted_data = unpad(cipher.decrypt(ciphertext), AES.block_size)
+    cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+    decrypted_data = cipher.decrypt(ciphertext)
 
     # Save decrypted file
     decrypted_file_path = encrypted_file_path[:-4]
     with open(decrypted_file_path, 'wb') as dec_file:
         dec_file.write(decrypted_data)
+
     return decrypted_file_path
 
 def generate_AES_key():
+    # Generate a 256-bit key
     key = get_random_bytes(32)
     return key
 
-# General Hashing using SHA 256
+# General Hashing using SHA 256  (AES already implemented with HMAC)
 def hash_file(file_path):
     sha256_hash = hashlib.sha256()
     try:
@@ -171,7 +194,7 @@ def sign_data_dsa(data, private_key):
 def verify_signature_dsa(data, signature, public_key):
     pass
 
-# Key Storage
+# Key Storage functions
 def save_key(key, file_path="keys.json"):
     data = load_json(file_path) or {}
     data[file_path] = base64.b64encode(key).decode('utf-8')  # Save as base64 string
@@ -183,3 +206,5 @@ def load_key(file_path="keys.json"):
     if data and file_path in data:
         return base64.b64decode(data[file_path])
     return None
+
+# Key Exchange functions

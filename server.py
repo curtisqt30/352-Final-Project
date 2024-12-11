@@ -5,7 +5,7 @@ import pwinput
 from tqdm import tqdm
 import json
 
-from encryption_util import (
+from utilities import (
     aes_encrypt_file,
     aes_decrypt_file,
     generate_AES_key,
@@ -13,6 +13,10 @@ from encryption_util import (
     store_password,
     load_stored_password,
     verify_password,
+    load_json,
+    save_json,
+    load_database,
+    save_database,
     generate_RSA_keypair,
     rsa_encrypt,
     rsa_decrypt,
@@ -23,8 +27,6 @@ from encryption_util import (
     verify_signature_dsa,
     save_key,
     load_key,
-    load_database,
-    save_database
 )
 
 # dictionary to store client information
@@ -66,7 +68,6 @@ def handle_client(cliSock, cliInfo):
     print(f"Connection established with {cliInfo}")
     peer_ip, peer_port = cliInfo
     
-    #
     
     try:
         # Register the peer in the peer list

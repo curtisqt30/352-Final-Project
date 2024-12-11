@@ -6,7 +6,7 @@ from tqdm import tqdm
 import json
 import sys
 
-from encryption_util import (
+from utilities import (
     aes_encrypt_file,
     aes_decrypt_file,
     generate_AES_key,
@@ -14,6 +14,10 @@ from encryption_util import (
     store_password,
     load_stored_password,
     verify_password,
+    load_json,
+    save_json,
+    load_database,
+    save_database,
     generate_RSA_keypair,
     rsa_encrypt,
     rsa_decrypt,
@@ -23,8 +27,9 @@ from encryption_util import (
     sign_data_dsa,
     verify_signature_dsa,
     save_key,
-    load_key
+    load_key,
 )
+
 
 class Client:
     def __init__(self, server_ip="0.0.0.0", port_number=55555):
