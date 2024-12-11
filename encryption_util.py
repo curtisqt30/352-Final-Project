@@ -48,8 +48,8 @@ def aes_decrypt_file(encrypted_file_path, key):
     return decrypted_file_path
 
 def generate_AES_key():
-   key = get_random_bytes(32)
-   return key
+    key = get_random_bytes(32)
+    return key
 
 # General Hashing using SHA 256
 def hash_file(file_path):
@@ -65,52 +65,66 @@ def hash_file(file_path):
         return f"An error occurred: {e}"
 
 # Password functions
-def store_password(username, password, filename="db_pw.txt"):
+def store_password(username, password, filename="db_pw.json"):
     hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    with open(filename, "a") as file:
-        file.write(f"{username}:{hashed_password}\n")
+    
+    # Load existing users from JSON file
+    data = load_json(filename)
+    if data is None:
+        data = {}
 
-def load_stored_password(username, filename="db_pw.txt"):
-    try:
-        with open(filename, "r") as file:
-            for line in file:
-                stored_username, stored_hash = line.strip().split(":")
-                if stored_username == username:
-                    return stored_hash.encode()
-    except FileNotFoundError:
-        print("Password file not found.")
-    except ValueError:
-        print("Invalid password file format.")
+    # Add new user with hashed password
+    data[username] = hashed_password
+    
+    # Save back to the JSON file
+    save_json(data, filename)
+
+def load_stored_password(username, filename="db_pw.json"):
+    data = load_json(filename)
+    if data and username in data:
+        return data[username]
     return None
 
-def verify_password(username, password, filename="db_pw.txt"):
+def verify_password(username, password, filename="db_pw.json"):
     stored_hash = load_stored_password(username, filename)
     if stored_hash is None:
         return False
-    return bcrypt.checkpw(password.encode(), stored_hash)
-    
+    return bcrypt.checkpw(password.encode(), stored_hash.encode())
+
+# JSON utility functions
+def load_json(filename):
+    try:
+        if not os.path.exists(filename):
+            return None
+        with open(filename, 'r') as file:
+            return json.load(file)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Error loading JSON file: {e}")
+        return None
+
+def save_json(data, filename):
+    try:
+        with open(filename, 'w') as file:
+            json.dump(data, file, indent=4)
+    except OSError as e:
+        print(f"Error saving JSON file: {e}")
+
 # File Path Database functions
 database_lock = threading.Lock()
 
-def load_database(filename="db_filepaths.txt"):
+def load_database(filename="db_filepaths.json"):
     try:
         with database_lock:
-            if not os.path.exists(filename):
-                return {"file_index": {}, "peers": {}}
-            with open(filename, "r") as db_file:
-                return json.load(db_file)
-    except (json.JSONDecodeError, OSError) as e:
+            return load_json(filename) or {"file_index": {}, "peers": {}}
+    except Exception as e:
         print(f"Error loading database: {e}")
         return {"file_index": {}, "peers": {}}
 
-def save_database(data, filename="db_filepaths.txt"):
+def save_database(data, filename="db_filepaths.json"):
     try:
-        temp_file = filename + ".tmp"
         with database_lock:
-            with open(temp_file, "w") as db_file:
-                json.dump(data, db_file, indent=4)
-            os.replace(temp_file, filename)
-    except OSError as e:
+            save_json(data, filename)
+    except Exception as e:
         print(f"Error saving database: {e}")
 
 # RSA Functions
@@ -134,13 +148,13 @@ def rsa_decrypt(ciphertext, private_key):
 
 def sign_data_rsa(data, private_key):
     priv_key = RSA.import_key(private_key)
-    hash_obj = SHA256.new(data)
+    hash_obj = hashlib.sha256(data).digest()
     signature = pkcs1_15.new(priv_key).sign(hash_obj)
     return signature
 
 def verify_signature_rsa(data, signature, public_key):
     pub_key = RSA.import_key(public_key)
-    hash_obj = SHA256.new(data)
+    hash_obj = hashlib.sha256(data).digest()
     try:
         pkcs1_15.new(pub_key).verify(hash_obj, signature)
         return True
@@ -158,17 +172,14 @@ def verify_signature_dsa(data, signature, public_key):
     pass
 
 # Key Storage
-def save_key(key, file_path):
-    try:
-        with open(file_path, 'wb') as file:
-            file.write(key)
-    except OSError as e:
-        print(f"Error saving key to {file_path}: {e}")
+def save_key(key, file_path="keys.json"):
+    data = load_json(file_path) or {}
+    data[file_path] = base64.b64encode(key).decode('utf-8')  # Save as base64 string
+    
+    save_json(data, file_path)
 
-def load_key(file_path):
-    try:
-        with open(file_path, 'rb') as file:
-            return file.read()
-    except OSError as e:
-        print(f"Error loading key from {file_path}: {e}")
-        return None
+def load_key(file_path="keys.json"):
+    data = load_json(file_path)
+    if data and file_path in data:
+        return base64.b64decode(data[file_path])
+    return None
