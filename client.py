@@ -66,7 +66,7 @@ class Client:
         try:
             self.cli_sock.send(command.encode())
             response = self.cli_sock.recv(1024).decode()
-            print(f"Server response: {response}")
+            print(f"\nServer response:\n{response}")
             return response
         except Exception as e:
             print(f"Error sending command: {e}")
@@ -87,28 +87,10 @@ class Client:
             print(f"Indexing response: {response}")
 
     def list_peers(self):
-        response = self.send_command("LIST_PEERS")
-        print("Active peers:")
-        for peer in response.split("\n"):
-            try:
-                username, ip_port = peer.split(", IP:")
-                ip, port = ip_port.split(", Port:")
-                print(f"Username: {username.strip()}, IP: {ip.strip()}, Port: {port.strip()}")
-            except ValueError:
-                print(f"Invalid peer data: {peer}")
-
+        self.send_command("LIST_PEERS")
+        
     def list_files(self):
-        response = self.send_command("LIST_FILES")
-        if response:
-            try:
-                file_list = eval(response)
-                print("Available files:")
-                for file_entry in file_list:
-                    print(f"File: {file_entry['filename']}")
-                    for peer in file_entry['peers']:
-                        print(f"  - Offered by: {peer[0]}:{peer[1]}")
-            except Exception as e:
-                print(f"Error processing file list: {e}")
+        self.send_command("LIST_FILES")
 
     def request_file_from_peer(self, peer_ip, peer_port, filename):
         try:
@@ -172,7 +154,6 @@ if __name__ == "__main__":
             username = input("\nEnter your username: ")
             password = pwinput.pwinput(prompt="Enter your password: ") 
             if client.login(username, password):
-                print("Login successful!")
                 # Once logged in, show possible operations
                 while True:
                     print("\nChoose an action:")
@@ -202,16 +183,15 @@ if __name__ == "__main__":
                         print("Invalid action. Try again.")
                 break  # Exit loop after successful login
             else:
-                print("\nLogin failed. Please check your credentials.")
+                print("\nPlease check your credentials.")
         
         elif action == "2":  # Register
             username = input("\nEnter your new username: ")
             password = pwinput.pwinput(prompt="Enter your new password: ")
             if client.register(username, password):
-                print("Registration successful! Now login.")
                 continue
             else:
-                print("Registration failed. Please try again.")
+                print("Please try again.")
         
         elif action == "3":  # Exit
             print("Exiting program...")
