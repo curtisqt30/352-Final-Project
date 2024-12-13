@@ -29,7 +29,6 @@ from util import (
     save_key,
     load_key,
     get_current_timestamp,
-
 )
 
 
@@ -40,6 +39,7 @@ class Client:
         self.cli_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_port = 55556
+        self.incoming_requests = []
     
     # Connection Methods
     def connect(self):
@@ -79,16 +79,30 @@ class Client:
         try:
             data = conn.recv(1024).decode()
             command, *args = data.split()
+            
             if command == "REQUEST":
                 self.send_file(conn, args[0])
             elif command == "GET_SIZE":
                 self.send_file_size(conn, args[0])
+            elif command == "CONNECTION_REQUEST":
+                self.store_incoming_request(conn, addr)
             else:
                 conn.send("ERROR: Unknown command".encode())
         except Exception as e:
             print(f"Error handling request from {addr}: {e}")
         finally:
             conn.close()
+
+    def handle_connection_request(self, conn, addr):
+        print(f"Incoming connection request from {addr}")
+        # accept or reject connection 
+        response = input("Accept connection? (yes/no): ").strip().lower()
+        if response == "yes":
+            conn.send("CONNECTION_ACCEPTED".encode())
+            print(f"Connection with {addr} accepted.")
+        else:
+            conn.send("CONNECTION_REJECTED".encode())
+            print(f"Connection with {addr} rejected.")
 
     # File Transfer
     def send_file(self, conn, filename):
@@ -130,6 +144,38 @@ class Client:
                 print(f"File {filename} downloaded successfully.")
         except Exception as e:
             print(f"Failed to request file from peer: {e}")
+
+    def store_incoming_request(self, conn, addr):
+        self.incoming_requests.append((conn, addr))
+
+    def manage_incoming_requests(self):
+        if not self.incoming_requests:
+            print("No incoming connection requests.")
+            return
+        
+        print("\nIncoming Connection Requests:")
+        for index, (conn, addr) in enumerate(self.incoming_requests):
+            print(f"[{index}] From {addr}")
+        
+        try:
+            request_index = int(input("\nEnter the index of the request to manage or -1 to cancel: "))
+            if request_index == -1:
+                print("Returning to menu...")
+                return
+            
+            conn, addr = self.incoming_requests[request_index]
+            response = input(f"Accept connection from {addr}? (yes/no): ").strip().lower()
+            if response == "yes":
+                conn.send("CONNECTION_ACCEPTED".encode())
+                print(f"Connection with {addr} accepted.")
+            else:
+                conn.send("CONNECTION_REJECTED".encode())
+                print(f"Connection with {addr} rejected.")
+            
+            # Remove the handled request from the list
+            del self.incoming_requests[request_index]
+        except (ValueError, IndexError):
+            print("Invalid option. Please try again.")
 
     # Commands
     def send_command(self, command):
@@ -237,12 +283,12 @@ class Client:
             if connect_action == "1":
                 self.list_peers()
             elif connect_action == "2":
-                print("Incoming requests: (not implemented)")
+                self.manage_incoming_requests()
             elif connect_action == "3":
                 peer_ip = input("Enter the peer's IP: ")
                 peer_port = input("Enter the peer's port: ")
                 try:
-                    client.send_command(f"REQUEST_PEER {peer_ip} {peer_port}")
+                    self.send_command(f"REQUEST_PEER {peer_ip} {peer_port}")
                     print("Connection request sent.")
                 except Exception as e:
                     print(f"Failed to send connection request: {e}")
