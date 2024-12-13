@@ -156,31 +156,47 @@ if __name__ == "__main__":
             if client.login(username, password):
                 # Once logged in, show possible operations
                 while True:
-                    print("\nChoose an action:")
-                    print("[1] Upload file")
-                    print("[2] List active peers")
-                    print("[3] List available files")
-                    print("[4] Download file")
-                    print("[5] Exit")
-                    action = input("\nEnter the number of your choice: ").strip()
+                    print("\nSelect an option:")
+                    print("[1] Index Files")
+                    print("[2] Connect")
+                    print("[3] List Indices")
+                    print("[4] Exit")
                     
-                    if action == "1":  # Upload file
+                    action = input("\nEnter your choice: ").strip()
+                    
+                    if action == "1":  # Index Files
                         filename = input("Enter file path to upload: ")
                         client.handle_index(filename, 5001, username)
-                    elif action == "2":  # List peers
-                        client.list_peers()
+
+                    elif action == "2":  # Connect Submenu
+                        while True:
+                            print("\nConnect Options:")
+                            print("[1] List Active Peers")
+                            print("[2] Manage Incoming Requests")
+                            print("[3] Send Connection Request")
+                            print("[4] Back to Main Menu")
+                            connect_action = input("\nEnter your choice: ").strip()
+                            if connect_action == "1":
+                                client.list_peers()
+                            elif connect_action == "2":
+                                print("Handling incoming requests... (not implemented)")
+                            elif connect_action == "3":
+                                peer_ip = input("Enter the peer's IP: ")
+                                peer_port = input("Enter the peer's port: ")
+                                client.send_command(f"REQUEST_PEER {peer_ip} {peer_port}")
+                            elif connect_action == "4":
+                                break
+                            else:
+                                print("Invalid option. Please try again.")
+                    
                     elif action == "3":  # List files
                         client.list_files()
-                    elif action == "4":  # Download file
-                        peer_ip = input("Enter peer IP: ")
-                        peer_port = int(input("Enter peer port: "))
-                        filename = input("Enter filename to download: ")
-                        client.request_file_from_peer(peer_ip, peer_port, filename)
-                    elif action == "5":  # Exit
-                        print("Exiting...")
+                    elif action == "4":  # Exit
+                        print("Exiting program...")
                         break
+                    
                     else:
-                        print("Invalid action. Try again.")
+                        print("Invalid option. Please enter a valid number (1-4).")
                 break  # Exit loop after successful login
             else:
                 print("\nPlease check your credentials.")

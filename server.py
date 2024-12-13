@@ -171,6 +171,52 @@ def handle_client(cliSock, cliInfo):
                     response = "\n".join(peer_list)
                 cliSock.send(response.encode())
 
+            elif command == "REQUEST_PEER":
+                if len(args) < 1:
+                    cliSock.send(b"INVALID_ARGUMENTS")
+                    continue
+
+                requested_username = args[0]
+                with peer_list_lock:
+                    peer_found = None
+                    for ip, peers in database["peers"].items():
+                        for peer in peers:
+                            if peer['username'] == requested_username:
+                                peer_found = peer
+                                break
+                        if peer_found:
+                            break
+
+                if peer_found:
+                    response = f"PEER_FOUND {peer_found['username']} {peer_found['ip']} {peer_found['port']}"
+                    cliSock.send(response.encode())
+                else:
+                    cliSock.send(b"PEER_NOT_FOUND")
+
+            elif command == "LIST_REQUEST":
+                with file_index_lock:
+                    requests = database.get("file_requests", {})
+                    if requests:
+                        response = json.dumps(requests)
+                    else:
+                        response = "No file requests found."
+                    cliSock.send(response.encode())
+
+            elif command == "ACCEPT_REQUEST":
+                if len(args) < 1:
+                    cliSock.send(b"INVALID_ARGUMENTS")
+                    continue
+
+                filename = args[0]
+                with file_index_lock:
+                    requests = database.get("file_requests", {})
+                    if filename in requests:
+                        del requests[filename]
+                        database["file_requests"] = requests
+                        save_database(database)
+                        cliSock.send(b"REQUEST_ACCEPTED")
+                    else:
+                        cliSock.send(b"REQUEST_NOT_FOUND")
 
             elif command == "SEND_FILE":
                 if len(args) < 1:
