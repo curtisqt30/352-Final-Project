@@ -38,30 +38,100 @@ class Client:
         self.server_ip = server_ip
         self.port_number = port_number
         self.cli_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listen_port = 55556
     
+    # Connection Methods
     def connect(self):
         try:
             self.cli_sock.connect((self.server_ip, self.port_number))
             print(f"Connected to server {self.server_ip} on port {self.port_number}")
         except Exception as e:
             print(f"Failed to connect: {e}")
-            self.disconnect()  # Disconnect if connection fails
-            exit(1)  # Exit the program
-
-    def login(self, username, password):
-        command = f"LOGIN {username} {password}"
-        response = self.send_command(command)
-        return response == "LOGIN_SUCCESS"
-
-    def register(self, username, password):
-        command = f"REGISTER {username} {password}"
-        response = self.send_command(command)
-        return response == "REGISTER_SUCCESS"
+            self.disconnect()
+            sys.exit(1)
 
     def disconnect(self):
         self.cli_sock.close()
+        self.listen_sock.close()
         print("Disconnected from server.")
+    
+    # Listener Methods
+    def start_listening(self):
+        try:
+            self.listen_sock.bind(("0.0.0.0", self.listen_port))
+            self.listen_sock.listen(5)
+            print(f"Listening for incoming requests on port {self.listen_port}...")
+            threading.Thread(target=self.handle_incoming_connections, daemon=True).start()
+        except Exception as e:
+            print(f"Error starting listener: {e}")
 
+    def handle_incoming_connections(self):
+        while True:
+            try:
+                conn, addr = self.listen_sock.accept()
+                print(f"Incoming connection from {addr}")
+                threading.Thread(target=self.handle_peer_request, args=(conn, addr), daemon=True).start()
+            except Exception as e:
+                print(f"Error accepting connection: {e}")
+
+    def handle_peer_request(self, conn, addr):
+        try:
+            data = conn.recv(1024).decode()
+            command, *args = data.split()
+            if command == "REQUEST":
+                self.send_file(conn, args[0])
+            elif command == "GET_SIZE":
+                self.send_file_size(conn, args[0])
+            else:
+                conn.send("ERROR: Unknown command".encode())
+        except Exception as e:
+            print(f"Error handling request from {addr}: {e}")
+        finally:
+            conn.close()
+
+    # File Transfer
+    def send_file(self, conn, filename):
+        try:
+            if not os.path.exists(filename):
+                conn.send(f"ERROR: File not found: {filename}".encode())
+                return
+            with open(filename, "rb") as f:
+                print(f"Sending file: {filename}")
+                while chunk := f.read(1024):
+                    conn.send(chunk)
+            print(f"File {filename} sent successfully.")
+        except Exception as e:
+            print(f"Error sending file: {e}")
+
+    def send_file_size(self, conn, filename):
+        try:
+            if not os.path.exists(filename):
+                conn.send(f"ERROR: File not found: {filename}".encode())
+                return
+            file_size = os.path.getsize(filename)
+            conn.send(str(file_size).encode())
+        except Exception as e:
+            print(f"Error sending file size: {e}")
+
+    def request_file_from_peer(self, peer_ip, peer_port, filename):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
+                peer_sock.connect((peer_ip, peer_port))
+                peer_sock.send(f"REQUEST {filename}".encode())
+                peer_sock.send("GET_SIZE".encode())
+                file_size = int(peer_sock.recv(1024).decode())
+
+                with open(f"downloaded_{filename}", "wb") as f, tqdm(total=file_size, unit="B", unit_scale=True) as pbar:
+                    print(f"Downloading {filename} from {peer_ip}:{peer_port}...")
+                    while data := peer_sock.recv(1024):
+                        f.write(data)
+                        pbar.update(len(data))
+                print(f"File {filename} downloaded successfully.")
+        except Exception as e:
+            print(f"Failed to request file from peer: {e}")
+
+    # Commands
     def send_command(self, command):
         try:
             self.cli_sock.send(command.encode())
@@ -72,53 +142,114 @@ class Client:
             print(f"Error sending command: {e}")
             return f"Error: {e}"
 
-    def handle_index(self, filename, port, username):
-        # Check if the file exists
+    def handle_index(self, filename, listen_port, username):
         if not os.path.exists(filename):
             print(f"File {filename} doesn't exist.")
             return
-
-        # Send the command to index the file with the username and port
-        command = f"INDEX {filename} {username} {port}"
-        response = self.send_command(command)
-
-        # Print the response from the server
-        if response:
-            print(f"Indexing response: {response}")
-
+        response = self.send_command(f"INDEX {filename} {username} {listen_port}")
+        print(f"Indexing response: {response}")
+        
     def list_peers(self):
         self.send_command("LIST_PEERS")
-        
+
     def list_files(self):
         self.send_command("LIST_FILES")
 
-    def request_file_from_peer(self, peer_ip, peer_port, filename):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
-                peer_sock.connect((peer_ip, peer_port))
-                peer_sock.send(f"REQUEST {filename}".encode())
-                
-                # Get the file size first to display a progress bar
-                peer_sock.send("GET_SIZE".encode())
-                file_size = int(peer_sock.recv(1024).decode())  # Receive the size of the file
+    # User Interface
+    def main_menu(self):
+        while True:
+            print("\nSelect an option:")
+            print("[1] Login")
+            print("[2] Register")
+            print("[3] Exit")
+            choice = input("\nEnter your choice: ").strip()
 
-                with open(f"downloaded_{filename}", "wb") as f:
-                    print(f"Downloading {filename} from {peer_ip}:{peer_port}...")
-                    
-                    # Initialize the tqdm progress bar
-                    with tqdm(total=file_size, unit="B", unit_scale=True) as pbar:
-                        total_received = 0
-                        while True:
-                            data = peer_sock.recv(1024)
-                            if not data:
-                                break
-                            f.write(data)
-                            total_received += len(data)
-                            pbar.update(len(data))  # Update progress bar 
+            if choice == "1":
+                self.handle_login()
+            elif choice == "2":
+                self.handle_registration()
+            elif choice == "3":
+                self.disconnect()
+                break
+            else:
+                print("Invalid option. Please try again.")
 
-                    print(f"\nFile {filename} downloaded successfully.")
-        except Exception as e:
-            print(f"Failed to request file from peer: {e}")
+    def login(self, username, password):
+        command = f"LOGIN {username} {password}"
+        response = self.send_command(command)
+        return response == "LOGIN_SUCCESS"
+
+    def register(self, username, password):
+        command = f"REGISTER {username} {password}"
+        response = self.send_command(command)
+        return response == "REGISTER_SUCCESS"
+ 
+    def handle_login(self):
+        username = input("\nEnter your username: ")
+        password = pwinput.pwinput(prompt="Enter your password: ")
+        if self.login(username, password):
+            self.logged_in_menu(username)
+        else:
+            print("Invalid credentials. Please try again.")
+
+    def handle_registration(self):
+        username = input("\nEnter your new username: ")
+        password = pwinput.pwinput(prompt="Enter your new password: ")
+        self.register(username, password)
+
+    def logged_in_menu(self, username):
+        while True:
+            print("\nSelect an option:")
+            print("[1] Index Files")
+            print("[2] Connect")
+            print("[3] List Indices")
+            print("[4] Exit")
+
+            action = input("\nEnter your choice: ").strip()
+
+            if action == "1":
+                filename = input("Enter file path to upload: ")
+                self.handle_index(filename, self.listen_port, username)
+
+            elif action == "2":
+                self.connect_menu()
+
+            elif action == "3":
+                self.list_files()
+
+            elif action == "4":
+                print("Logging out...")
+                break
+
+            else:
+                print("Invalid option. Please try again.")
+        
+    def connect_menu(self):
+        while True:
+            print("\nConnect Options:")
+            print("[1] List Active Peers")
+            print("[2] Manage Incoming Requests")
+            print("[3] Send Connection Request")
+            print("[4] Back to Main Menu")
+
+            connect_action = input("\nEnter your choice: ").strip()
+
+            if connect_action == "1":
+                self.list_peers()
+            elif connect_action == "2":
+                print("Incoming requests: (not implemented)")
+            elif connect_action == "3":
+                peer_ip = input("Enter the peer's IP: ")
+                peer_port = input("Enter the peer's port: ")
+                try:
+                    client.send_command(f"REQUEST_PEER {peer_ip} {peer_port}")
+                    print("Connection request sent.")
+                except Exception as e:
+                    print(f"Failed to send connection request: {e}")
+            elif connect_action == "4":
+                break  # Exit the Connect menu
+            else:
+                print("Invalid option. Please try again.")
 
 if __name__ == "__main__":
     
@@ -140,80 +271,6 @@ if __name__ == "__main__":
     client = Client(server_ip=server_ip, port_number=port_number)
     client.connect()  # If connection fails, exit
 
-    while True:
-        # Display numbered options
-        print("\nSelect an option:")
-        print("[1] Login")
-        print("[2] Register")
-        print("[3] Exit")
-        
-        # Get user input for action selection
-        action = input("\nEnter the number of your choice: ").strip()
-        
-        if action == "1":  # Login
-            username = input("\nEnter your username: ")
-            password = pwinput.pwinput(prompt="Enter your password: ") 
-            if client.login(username, password):
-                # Once logged in, show possible operations
-                while True:
-                    print("\nSelect an option:")
-                    print("[1] Index Files")
-                    print("[2] Connect")
-                    print("[3] List Indices")
-                    print("[4] Exit")
-                    
-                    action = input("\nEnter your choice: ").strip()
-                    
-                    if action == "1":  # Index Files
-                        filename = input("Enter file path to upload: ")
-                        client.handle_index(filename, 5001, username)
+    client.start_listening() # Listen for incoming connections from other peers
 
-                    elif action == "2":  # Connect Submenu
-                        while True:
-                            print("\nConnect Options:")
-                            print("[1] List Active Peers")
-                            print("[2] Manage Incoming Requests")
-                            print("[3] Send Connection Request")
-                            print("[4] Back to Main Menu")
-                            connect_action = input("\nEnter your choice: ").strip()
-                            if connect_action == "1":
-                                client.list_peers()
-                            elif connect_action == "2":
-                                print("Handling incoming requests... (not implemented)")
-                            elif connect_action == "3":
-                                peer_ip = input("Enter the peer's IP: ")
-                                peer_port = input("Enter the peer's port: ")
-                                client.send_command(f"REQUEST_PEER {peer_ip} {peer_port}")
-                            elif connect_action == "4":
-                                break
-                            else:
-                                print("Invalid option. Please try again.")
-                    
-                    elif action == "3":  # List files
-                        client.list_files()
-                    elif action == "4":  # Exit
-                        print("Exiting program...")
-                        break
-                    
-                    else:
-                        print("Invalid option. Please enter a valid number (1-4).")
-                break  # Exit loop after successful login
-            else:
-                print("\nPlease check your credentials.")
-        
-        elif action == "2":  # Register
-            username = input("\nEnter your new username: ")
-            password = pwinput.pwinput(prompt="Enter your new password: ")
-            if client.register(username, password):
-                continue
-            else:
-                print("Please try again.")
-        
-        elif action == "3":  # Exit
-            print("Exiting program...")
-            break
-        
-        else:
-            print("Invalid option. Please enter a valid number (1, 2, or 3).")
-    
-    client.disconnect()
+    client.main_menu()
