@@ -5,6 +5,7 @@ import pwinput
 from tqdm import tqdm
 import json
 import sys
+import random
 
 from util import (
     aes_encrypt_file,
@@ -33,12 +34,12 @@ from util import (
 
 
 class Client:
-    def __init__(self, server_ip="0.0.0.0", port_number=55555):
+    def __init__(self, server_ip="0.0.0.0", port_number=49152):
         self.server_ip = server_ip
         self.port_number = port_number
         self.cli_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.listen_port = 55556
+        self.listen_port = random.randint(49153, 65535)
         self.incoming_requests = []
     
     # Connection Methods
@@ -46,6 +47,14 @@ class Client:
         try:
             self.cli_sock.connect((self.server_ip, self.port_number))
             print(f"Connected to server {self.server_ip} on port {self.port_number}")
+            self.cli_sock.send(f"LISTEN_PORT {self.listen_port}".encode())
+            
+            response = self.cli_sock.recv(1024).decode()
+            if response == "LISTEN_PORT_ACK":
+                print(f"Server acknowledged listen port: {self.listen_port}")
+            else:
+                print("Unexpected response from server:", response)
+            
         except Exception as e:
             print(f"Failed to connect: {e}")
             self.disconnect()
@@ -150,7 +159,7 @@ class Client:
 
     def manage_incoming_requests(self):
         if not self.incoming_requests:
-            print("No incoming connection requests.")
+            print("\nNo incoming connection requests.")
             return
         
         print("\nIncoming Connection Requests:")
@@ -246,27 +255,23 @@ class Client:
     def logged_in_menu(self, username):
         while True:
             print("\nSelect an option:")
-            print("[1] Index Files")
-            print("[2] Connect")
-            print("[3] List Indices")
+            print("[1] Connect")
+            print("[2] Index a File")
+            print("[3] List Indexed Files")
             print("[4] Exit")
 
             action = input("\nEnter your choice: ").strip()
 
             if action == "1":
+                self.connect_menu()
+            elif action == "2":
                 filename = input("Enter file path to upload: ")
                 self.handle_index(filename, self.listen_port, username)
-
-            elif action == "2":
-                self.connect_menu()
-
             elif action == "3":
                 self.list_files()
-
             elif action == "4":
                 print("Logging out...")
                 break
-
             else:
                 print("Invalid option. Please try again.")
         
@@ -311,10 +316,7 @@ if __name__ == "__main__":
     print("")
     '''
     
-    server_ip = "127.0.0.1"
-    port_number = 55555
-    
-    client = Client(server_ip=server_ip, port_number=port_number)
+    client = Client(server_ip="127.0.0.1", port_number=49152)
     client.connect()  # If connection fails, exit
 
     client.start_listening() # Listen for incoming connections from other peers

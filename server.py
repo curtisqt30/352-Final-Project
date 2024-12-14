@@ -72,6 +72,14 @@ def handle_client(cliSock, cliInfo):
     peer_ip, peer_port = cliInfo
     
     try:
+        listening_port = None
+        
+        data = cliSock.recv(1024).decode()  # receive the listen port information
+        if data.startswith("LISTEN_PORT"):
+            listening_port = data.split()[1]
+            print(f"Received listen port: {listening_port} from {peer_ip}")
+            cliSock.send(b"LISTEN_PORT_ACK")  # Acknowledge
+        
         while True:
             data = cliSock.recv(1024).decode()
             if not data:
@@ -103,7 +111,8 @@ def handle_client(cliSock, cliInfo):
                         database["peers"][peer_ip].append({
                             "username": username,
                             "ip": peer_ip,
-                            "port": peer_port
+                            "port": peer_port,
+                            "listening_port": listening_port
                         })
                         save_database(database)
 
@@ -167,7 +176,13 @@ def handle_client(cliSock, cliInfo):
                     peer_list = []
                     for ip, peers in database["peers"].items():
                         for peer in peers:
-                            peer_list.append(f"Username: {peer['username']}, IP: {peer['ip']}, Port: {peer['port']}")
+                            peer_info = (
+                                f"Username: {peer['username']}, "
+                                f"IP: {peer['ip']}, "
+                                f"Port: {peer['port']}, "
+                                f"Listening Port: {peer['listening_port']}"
+                            )
+                            peer_list.append(peer_info)
                     response = "\n".join(peer_list)
                 cliSock.send(response.encode())
 
@@ -274,4 +289,4 @@ def start_server(host, port):
         serverSock.close()
 
 if __name__ == "__main__":
-    start_server("127.0.0.1", 55555)
+    start_server("127.0.0.1", 49152)
