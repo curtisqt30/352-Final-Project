@@ -203,6 +203,14 @@ def handle_client(cliSock, cliInfo):
                             break
 
                 if peer_found:
+                    # Store incoming request (can be a dictionary or list)
+                    with peer_list_lock:
+                        if "incoming_requests" not in database:
+                            database["incoming_requests"] = []
+                        database["incoming_requests"].append({
+                            "from": requested_username,
+                            "peer": peer_found,
+                        })
                     response = f"PEER_FOUND {peer_found['username']} {peer_found['ip']} {peer_found['port']}"
                     cliSock.send(response.encode())
                 else:

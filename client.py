@@ -32,7 +32,6 @@ from util import (
     get_current_timestamp,
 )
 
-
 class Client:
     def __init__(self, server_ip="0.0.0.0", port_number=49152):
         self.server_ip = server_ip
@@ -41,6 +40,7 @@ class Client:
         self.listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_port = random.randint(49153, 65535)
         self.incoming_requests = []
+        self.local_file_directory = "client_files"
     
     # Connection Methods
     def connect(self):
@@ -290,10 +290,9 @@ class Client:
             elif connect_action == "2":
                 self.manage_incoming_requests()
             elif connect_action == "3":
-                peer_ip = input("Enter the peer's IP: ")
-                peer_port = input("Enter the peer's port: ")
+                peer_username = input("Enter the peer's username: ")
                 try:
-                    self.send_command(f"REQUEST_PEER {peer_ip} {peer_port}")
+                    self.send_command(f"REQUEST_PEER {peer_username}")
                     print("Connection request sent.")
                 except Exception as e:
                     print(f"Failed to send connection request: {e}")
