@@ -118,12 +118,15 @@ def verify_password(username, password, filename="db_pw.json"):
 # JSON utility functions
 def load_json(filename):
     try:
-        if not os.path.exists(filename):
-            return None
-        with open(filename, 'r') as file:
-            return json.load(file)
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Error loading JSON file: {e}")
+        with open(filename, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return None
+    except json.JSONDecodeError:
+        print(f"Error: Failed to decode JSON from {filename}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error when loading {filename}: {e}")
         return None
 
 def save_json(data, filename):

@@ -157,35 +157,6 @@ class Client:
     def store_incoming_request(self, conn, addr):
         self.incoming_requests.append((conn, addr))
 
-    def manage_incoming_requests(self):
-        if not self.incoming_requests:
-            print("\nNo incoming connection requests.")
-            return
-        
-        print("\nIncoming Connection Requests:")
-        for index, (conn, addr) in enumerate(self.incoming_requests):
-            print(f"[{index}] From {addr}")
-        
-        try:
-            request_index = int(input("\nEnter the index of the request to manage or -1 to cancel: "))
-            if request_index == -1:
-                print("Returning to menu...")
-                return
-            
-            conn, addr = self.incoming_requests[request_index]
-            response = input(f"Accept connection from {addr}? (yes/no): ").strip().lower()
-            if response == "yes":
-                conn.send("CONNECTION_ACCEPTED".encode())
-                print(f"Connection with {addr} accepted.")
-            else:
-                conn.send("CONNECTION_REJECTED".encode())
-                print(f"Connection with {addr} rejected.")
-            
-            # Remove the handled request from the list
-            del self.incoming_requests[request_index]
-        except (ValueError, IndexError):
-            print("Invalid option. Please try again.")
-
     # Commands
     def send_command(self, command):
         try:
@@ -209,6 +180,51 @@ class Client:
 
     def list_files(self):
         self.send_command("LIST_FILES")
+
+    def list_incoming_requests(self):
+        response = self.send_command("LIST_INCOMING_REQUESTS")
+
+        if response.startswith("INCOMING_REQUESTS"):
+            if response == "INCOMING_REQUESTS_EMPTY":
+                print("No incoming requests at the moment.")
+            else:
+                try:
+                    incoming_requests = json.loads(response[len("INCOMING_REQUESTS "):])
+                except json.JSONDecodeError:
+                    print("Error decoding incoming requests.")
+        else:
+            print("Failed to fetch incoming requests from the server.")
+
+    def clear_incoming_requests(self):
+        command = "CLEAR_INCOMING_REQUESTS"
+        response = self.send_command(command)
+        if response == "INCOMING_REQUESTS_CLEARED":
+            print("Incoming requests have been cleared.")
+        else:
+            print("Failed to clear incoming requests.")
+
+    def accept_incoming_request(self):
+        if not self.incoming_requests:
+            print("No incoming requests to accept.")
+            return
+
+        try:
+            request_index = int(input("\nEnter the index of the request to accept: ").strip())
+
+            if request_index < 0 or request_index >= len(self.incoming_requests):
+                print("Invalid index. Returning to menu.")
+                return
+
+            conn, addr = self.incoming_requests[request_index]
+            print(f"Accepting connection from {addr}")
+            conn.send("CONNECTION_ACCEPTED".encode())  # Send acceptance message
+            print(f"Connection with {addr} accepted.")
+
+            # Remove the handled request from the list
+            del self.incoming_requests[request_index]
+
+        except ValueError:
+            print("Invalid input. Returning to menu.")
 
     # User Interface
     def main_menu(self):
@@ -300,6 +316,31 @@ class Client:
                 break  # Exit the Connect menu
             else:
                 print("Invalid option. Please try again.")
+
+    def manage_incoming_requests(self):
+        while True:
+            print("\nSelect an option:")
+            print("[1] List Incoming Requests")
+            print("[2] Accept Incoming Request")
+            print("[3] Clear Incoming Requests")
+            print("[4] Return to Previous Menu")
+
+            try:
+                request_choice = int(input("\nEnter your choice: ").strip())
+
+                if request_choice == 1:
+                    self.list_incoming_requests()  
+                elif request_choice == 2:
+                    self.accept_incoming_request()  
+                elif request_choice == 3:
+                    self.clear_incoming_requests()
+                elif request_choice == 4:
+                    print("Returning to previous menu...")
+                    return 
+                else:
+                    print("Invalid choice. Please try again.")
+            except ValueError:
+                print("Invalid choice. Please enter a number.")
 
 if __name__ == "__main__":
     

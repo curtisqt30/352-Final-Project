@@ -150,7 +150,6 @@ def handle_client(cliSock, cliInfo):
                 with file_index_lock:
                     if filename not in database["file_index"]:
                         database["file_index"][filename] = []
-                    # Store the file
                     database["file_index"][filename].append({
                         "username": username,
                         "ip": peer_ip,
@@ -160,8 +159,7 @@ def handle_client(cliSock, cliInfo):
 
                 cliSock.send(b"File indexed successfully.")
 
-            elif command == "LIST_FILES":
-                # Send a list of files
+            elif command == "LIST_FILES": # List files
                 with file_index_lock:
                     file_list = [
                         {"filename": filename, "peers": database["file_index"][filename]}
@@ -170,8 +168,7 @@ def handle_client(cliSock, cliInfo):
                 response = json.dumps(file_list) 
                 cliSock.send(response.encode())
 
-            elif command == "LIST_PEERS":
-                # Send a list of peers with their usernames, IP, and port
+            elif command == "LIST_PEERS": # List peers
                 with peer_list_lock:
                     peer_list = []
                     for ip, peers in database["peers"].items():
@@ -203,26 +200,38 @@ def handle_client(cliSock, cliInfo):
                             break
 
                 if peer_found:
-                    # Store incoming request (can be a dictionary or list)
                     with peer_list_lock:
                         if "incoming_requests" not in database:
                             database["incoming_requests"] = []
                         database["incoming_requests"].append({
                             "from": requested_username,
+                            "to": peer_found['username'],
                             "peer": peer_found,
                         })
                     response = f"PEER_FOUND {peer_found['username']} {peer_found['ip']} {peer_found['port']}"
                     cliSock.send(response.encode())
                 else:
                     cliSock.send(b"PEER_NOT_FOUND")
+            
+            elif command == "CLEAR_INCOMING_REQUESTS":
+                with peer_list_lock:
+                    database["incoming_requests"] = []
+                cliSock.send("INCOMING_REQUESTS_CLEARED".encode())
 
-            elif command == "LIST_REQUEST":
-                with file_index_lock:
-                    requests = database.get("file_requests", {})
-                    if requests:
-                        response = json.dumps(requests)
-                    else:
-                        response = "No file requests found."
+            elif command == "LIST_INCOMING_REQUESTS":
+                with peer_list_lock:
+                    incoming_requests = database.get("incoming_requests", [])
+
+                if incoming_requests:
+                    formatted_requests = []
+                    for request in incoming_requests:
+                        formatted_requests.append(
+                            f"From: {request['from']} to: {request['to']} - Peer Info: {request['peer']}"
+                        )
+                    response = "INCOMING_REQUESTS " + "\n".join(formatted_requests)
+                    cliSock.send(response.encode())
+                else:
+                    response = "INCOMING_REQUESTS_EMPTY"
                     cliSock.send(response.encode())
 
             elif command == "ACCEPT_REQUEST":
