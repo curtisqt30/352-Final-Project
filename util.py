@@ -142,10 +142,17 @@ database_lock = threading.Lock()
 def load_database(filename="db_filepaths.json"):
     try:
         with database_lock:
-            return load_json(filename) or {"file_index": {}, "peers": {}}
+            data = load_json(filename) or {}
+            if "file_index" not in data:
+                data["file_index"] = {}
+            if "peers" not in data:
+                data["peers"] = {}
+            if "incoming_requests" not in data:
+                data["incoming_requests"] = {}
+            return data
     except Exception as e:
         print(f"Error loading database: {e}")
-        return {"file_index": {}, "peers": {}}
+        return {"file_index": {}, "peers": {}, "incoming_requests": {}}
 
 def save_database(data, filename="db_filepaths.json"):
     try:
