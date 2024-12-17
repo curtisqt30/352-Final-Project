@@ -1,0 +1,41 @@
+TO DO LIST
+
+1. Server needs to send the CA to client if the project is to work in different directories
+2. List Active peers that area connected with the server 
+
+		===================================
+
+		   WELCOME, TEST!
+
+		===================================
+
+		[1] 📤 Index File
+
+		[2] 📂 Search File
+
+		[3] 🔄 Request File from Peer
+
+		[4] 🛡️  Validate File Index
+
+								<---------------- Add a active peer list?
+
+		[5] 🔙 Exit
+
+		===================================
+
+3. simpler file path finding? using a predfined directory called "client_files/
+	
+	example_client_directory/
+	│
+	├── client.py          # The client script
+	├── util.py            # Utility 
+	├── server_cert.pem    # Server certificate
+	└── client_files/      # Predefined directory for files
+		├── myfile.txt     # Example file to upload
+		├── myfile.txt.enc # Encrypted version of myfile.txt
+		├── myfile_key.json # AES key for decryption
+		├── downloaded_file.txt  # Example downloaded file
+		
+4. Add more UI features to notify user that the user login
+	-	Add a short timeout to show failure or success before moving back to login page.
+
