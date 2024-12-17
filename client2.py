@@ -4,6 +4,7 @@ import json
 from tqdm import tqdm
 import ssl
 import threading
+import pwinput
 from colorama import Fore, Style, init
 from util import (
     hash_file,
@@ -69,9 +70,16 @@ class Client:
         self.clear_screen()
         print(Fore.CYAN + "========== Register ==========")
         username = input("Enter a new username: ").strip()
-        password = input("Enter a new password: ").strip()
+        password = pwinput.pwinput("Enter a new password: ", mask="*").strip() 
+        confirm_password = pwinput.pwinput("Confirm your password: ", mask="*").strip()
+
+        if password != confirm_password:
+            print(Fore.RED + "Passwords do not match. Please try again.")
+            return
+
         self.server_socket.send(f"REGISTER {username} {password}".encode())
         response = self.server_socket.recv(1024).decode()
+
         if response == "REGISTER_SUCCESS":
             print(Fore.GREEN + "Registration successful! Please login.")
         elif response == "USERNAME_TAKEN":
@@ -83,9 +91,11 @@ class Client:
         self.clear_screen()
         print(Fore.CYAN + "========== Login ==========")
         username = input("Enter your username: ").strip()
-        password = input("Enter your password: ").strip()
+        password = pwinput.pwinput("Enter your password: ", mask="*").strip()
+
         self.server_socket.send(f"LOGIN {username} {password}".encode())
         response = self.server_socket.recv(1024).decode()
+
         if response == "LOGIN_SUCCESS":
             print(Fore.GREEN + "Login successful!")
             self.username = username
