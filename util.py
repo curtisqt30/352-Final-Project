@@ -188,18 +188,21 @@ def rsa_decrypt(ciphertext, private_key):
     return decrypted
 
 def sign_data_rsa(data, private_key):
-    priv_key = RSA.import_key(private_key)
-    hash_obj = hashlib.sha256(data).digest()
-    signature = pkcs1_15.new(priv_key).sign(hash_obj)
+    if isinstance(private_key, bytes):
+        raise ValueError("Private key must be an RSA key.")
+    
+    hash_obj = SHA256.new(data)
+    signature = pkcs1_15.new(private_key).sign(hash_obj)
     return signature
-
+\
 def verify_signature_rsa(data, signature, public_key):
-    pub_key = RSA.import_key(public_key)
-    hash_obj = hashlib.sha256(data).digest()
     try:
+        pub_key = RSA.import_key(public_key)
+        hash_obj = hashlib.sha256(data).digest()
         pkcs1_15.new(pub_key).verify(hash_obj, signature)
         return True
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as e:
+        print(f"Signature verification failed: {e}")
         return False
 
 # DSA Functions

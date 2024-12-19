@@ -2,7 +2,9 @@ import socket
 import threading
 import json
 import ssl
+import traceback
 import os
+from Crypto.PublicKey import RSA, DSA 
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -50,26 +52,41 @@ def handle_client(client_socket, client_address):
                 else:
                     store_password(username, password)
                     client_socket.send(b"REGISTER_SUCCESS")
+
             elif command == "LOGIN":
                 username, password = args
                 if verify_password(username, password):
                     client_socket.send(b"LOGIN_SUCCESS")
                 else:
                     client_socket.send(b"LOGIN_FAILURE")
-            elif command == "INDEX":
-                username, filename, ip, port, file_hash = args
-                signed_index = sign_data_rsa(file_hash.encode(), SERVER_PRIVATE_KEY)
 
-                with database_lock:
-                    database["file_index"][filename] = {
-                        "username": username,
-                        "ip": ip,
-                        "port": port,
-                        "hash": file_hash,
-                        "signature": signed_index.hex(),
-                    }
-                    save_database(database)
-                client_socket.send(b"INDEX_SUCCESS")
+            elif command == "INDEX":
+                try:
+                    username, filename, ip, port, file_hash = args
+                    print(f"INDEX command received for file: {filename}")
+
+                    # Validate the private key
+                    if not isinstance(SERVER_PRIVATE_KEY, RSA.RsaKey):
+                        raise ValueError("SERVER_PRIVATE_KEY is not a valid RSA key object.")
+
+                    signed_index = sign_data_rsa(file_hash.encode(), SERVER_PRIVATE_KEY)
+
+                    with database_lock:
+                        database["file_index"][filename] = {
+                            "username": username,
+                            "ip": ip,
+                            "port": port,
+                            "hash": file_hash,
+                            "signature": signed_index.hex(),
+                        }
+                        save_database(database)
+
+                    client_socket.send(b"INDEX_SUCCESS")
+                except Exception as e:
+                    print(f"Error handling INDEX command: {e}")
+                    traceback.print_exc() 
+                    client_socket.send(b"INDEX_FAILURE")
+
             elif command == "SEARCH":
                 query = args[0]
                 with database_lock:
@@ -82,6 +99,7 @@ def handle_client(client_socket, client_address):
                         if query in filename
                     ]
                 client_socket.send(json.dumps(matches).encode())
+
             elif command == "VERIFY_INDEX":
                 filename = args[0]
                 with database_lock:
@@ -101,12 +119,12 @@ def handle_client(client_socket, client_address):
                     client_socket.send(b"INDEX_INVALID")
             else:
                 client_socket.send(b"UNKNOWN_COMMAND")
+
     except Exception as e:
         print(f"Error handling client {client_address}: {e}")
     finally:
         client_socket.close()
 
-# Fnuction to generate or replace the old self-signed certificate
 def generate_self_signed_cert(cert_file="server_cert.pem", key_file="server_key.pem"):
     if os.path.exists(cert_file) or os.path.exists(key_file):
         choice = input("Old certificate and key found. Do you want to replace them? (yes/no): ").strip().lower()
@@ -134,7 +152,7 @@ def generate_self_signed_cert(cert_file="server_cert.pem", key_file="server_key.
 
     # Define SAN for IP and localhost
     san = x509.SubjectAlternativeName([
-        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),  # Convert string to IPv4Address
+        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
         x509.DNSName("localhost")
     ])
 
@@ -146,7 +164,7 @@ def generate_self_signed_cert(cert_file="server_cert.pem", key_file="server_key.
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(datetime.datetime.utcnow())
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))  # Valid for 1 year
+        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))
         .add_extension(san, critical=False)
         .sign(key, hashes.SHA256(), default_backend())
     )
@@ -156,7 +174,7 @@ def generate_self_signed_cert(cert_file="server_cert.pem", key_file="server_key.
         f.write(key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.TraditionalOpenSSL,
-            encryption_algorithm=serialization.NoEncryption()
+            encryption_algorithm=NoEncryption()
         ))
 
     # Write certificate to file

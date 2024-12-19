@@ -163,6 +163,7 @@ class Client:
             # Send INDEX command with file hash
             self.server_socket.send(f"INDEX {self.username} {filename} {socket.gethostbyname(socket.gethostname())} 5000 {file_hash}".encode())
             response = self.server_socket.recv(1024).decode()
+            print(f"Server response: {response}")
 
             if response == "INDEX_SUCCESS":
                 print(Fore.GREEN + f"File '{filename}' indexed successfully!")
