@@ -1,501 +1,410 @@
 import socket
 import os
+import json
+from tqdm import tqdm
+import ssl
 import threading
 import pwinput
-from tqdm import tqdm
-import json
-import sys
-import random
-import logging
-
+from colorama import Fore, Style, init
 from util import (
+    hash_file,
     aes_encrypt_file,
     aes_decrypt_file,
-    generate_AES_key,
-    hash_file,
-    store_password,
-    load_stored_password,
-    verify_password,
-    load_json,
-    save_json,
-    load_database,
-    save_database,
-    generate_RSA_keypair,
     rsa_encrypt,
     rsa_decrypt,
-    sign_data_rsa,
     verify_signature_rsa,
-    generate_DSA_keypair,
-    sign_data_dsa,
-    verify_signature_dsa,
+    generate_AES_key,
     save_key,
     load_key,
-    get_current_timestamp,
 )
-logging.basicConfig(level=logging.DEBUG, format='[%(asctime)s] %(levelname)s: %(message)s')
+
+init(autoreset=True)
+
+SERVER_PUBLIC_KEY = None  # Retrieve dynamically after connecting
 
 class Client:
-    def __init__(self, server_ip="0.0.0.0", port_number=49152):
+    def __init__(self, server_ip="127.0.0.1", server_port=49152):
         self.server_ip = server_ip
-        self.port_number = port_number
-        self.cli_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.listen_port = random.randint(49153, 65535)
-        self.incoming_requests = []
-        self.local_file_directory = "client_files"
-        os.makedirs(self.local_file_directory, exist_ok=True)
+        self.server_port = server_port
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.local_files_dir = "client_files"
+        self.username = None  # To track logged-in user
+        os.makedirs(self.local_files_dir, exist_ok=True)
 
-    
-    # Connection Methods
-    def connect(self):
+    def clear_screen(self):
+        os.system("cls" if os.name == "nt" else "clear")
+
+    def connect_to_server(self):
         try:
-            self.cli_sock.connect((self.server_ip, self.port_number))
-            print(f"Connected to server {self.server_ip} on port {self.port_number}")
-            self.cli_sock.send(f"LISTEN_PORT {self.listen_port}".encode())
-
-            response = self.cli_sock.recv(1024).decode()
-            if response == "LISTEN_PORT_ACK":
-                print(f"Server acknowledged listen port: {self.listen_port}")
-            else:
-                print("Unexpected response from server:", response)
-
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.load_verify_locations("server_cert.pem")
+            self.server_socket = context.wrap_socket(self.server_socket, server_hostname=self.server_ip)
+            self.server_socket.connect((self.server_ip, self.server_port))
+            print(Fore.GREEN + f"Connected securely to server at {self.server_ip}:{self.server_port}")
+        except ssl.SSLError as ssl_err:
+            print(Fore.RED + f"SSL Error: {ssl_err}. Ensure the server certificate is valid and accessible.")
+            exit(1)
+        except FileNotFoundError:
+            print(Fore.RED + "Certificate file not found. Please check 'server_cert.pem'.")
+            exit(1)
         except Exception as e:
-            print(f"Failed to connect: {e}")
-            self.disconnect()
-            sys.exit(1)
+            print(Fore.RED + f"Failed to connect to server: {e}")
+            exit(1)
 
-    def disconnect(self):
-        self.cli_sock.close()
-        self.listen_sock.close()
-        print("Disconnected from server.")
+    def send_file_with_hash(self, peer_socket, file_path):
+        aes_key = generate_AES_key()
+        encrypted_file_path = aes_encrypt_file(file_path, aes_key)
+        save_key(aes_key, f"{os.path.basename(file_path)}_key.json")
+
+        file_hash = hash_file(encrypted_file_path)  # Calculate hash of the encrypted file
+
+        # Send file hash first
+        peer_socket.send(f"HASH {file_hash}".encode())
+
+        # Send the encrypted file
+        with open(encrypted_file_path, "rb") as file:
+            peer_socket.sendall(file.read())
+        print(f"Encrypted file and hash sent: {encrypted_file_path}")
+
+    def register(self):
+        self.clear_screen()
+        print(Fore.CYAN + "========== Register ==========")
+        username = input("Enter a new username: ").strip()
+        password = pwinput.pwinput("Enter a new password: ", mask="*").strip()
+        confirm_password = pwinput.pwinput("Confirm your password: ", mask="*").strip()
+
+        if password != confirm_password:
+            print(Fore.RED + "Passwords do not match. Please try again.")
+            input(Fore.YELLOW + "Press Enter to continue...")
+            return
+
+        self.server_socket.send(f"REGISTER {username} {password}".encode())
+        response = self.server_socket.recv(1024).decode()
+
+        if response == "REGISTER_SUCCESS":
+            print(Fore.GREEN + "Registration successful! Please login.")
+        elif response == "USERNAME_TAKEN":
+            print(Fore.RED + "Username already taken. Try again.")
+        else:
+            print(Fore.RED + "Registration failed. Try again.")
         
-    def initiate_peer_connection(self, username, peer_ip, peer_port):
-        try:
-            print(f"Attempting to connect to {username} at {peer_ip}:{peer_port}...")
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
-                peer_sock.connect((peer_ip, peer_port))
-                print(f"Connected to {username}. Proceeding to file exchange...")
-                self.file_exchange(username)
-        except Exception as e:
-            print(f"Failed to connect to {username} at {peer_ip}:{peer_port}. Error: {e}")
-            
-    def wait_for_peer_acceptance(self, peer_username, peer_ip, peer_port):
-        try:
-            print("Waiting for peer to accept the connection request...")
-            self.cli_sock.settimeout(30)  # Wait for up to 30 seconds
+        input(Fore.YELLOW + "Press Enter to return to the menu...")
 
-            while True:
-                try:
-                    response = self.cli_sock.recv(1024).decode()
-                    if response == "CONNECTION_ACCEPTED":
-                        print(f"Peer '{peer_username}' accepted the connection. Starting file exchange...")
-                        self.initiate_peer_connection(peer_username, peer_ip, peer_port)
-                        break
-                    elif response == "CONNECTION_REJECTED":
-                        print(f"Peer '{peer_username}' rejected the connection.")
-                        break
-                    else:
-                        print(f"Unexpected response: {response}")
-                except socket.timeout:
-                    print("Timed out waiting for peer's response. Returning to menu.")
-                    break
-        except Exception as e:
-            print(f"Error waiting for peer acceptance: {e}")
-        finally:
-            self.cli_sock.settimeout(None)
-            
-    def accept_incoming_request(self):
-        if not self.incoming_requests:
-            print("\nNo incoming requests to accept.")
-            return
+    def login(self):
+        self.clear_screen()
+        print(Fore.CYAN + "========== Login ==========")
+        username = input("Enter your username: ").strip()
+        password = pwinput.pwinput("Enter your password: ", mask="*").strip()
 
-        try:
-            request_index = int(input("Enter the index of the request to accept: ").strip())
-            if request_index < 0 or request_index >= len(self.incoming_requests):
-                print("Invalid index. Returning to menu.")
-                return
+        self.server_socket.send(f"LOGIN {username} {password}".encode())
+        response = self.server_socket.recv(1024).decode()
 
-            conn, addr = self.incoming_requests[request_index]
-            conn.send("CONNECTION_ACCEPTED".encode())
-            print(f"Connection from {addr} accepted.")
-            self.incoming_requests.pop(request_index)
-        except Exception as e:
-            print(f"Error accepting request: {e}")
-            
-    def reject_incoming_request(self):
-        if not self.incoming_requests:
-            print("\nNo incoming requests to reject.")
-            return
-
-        try:
-            request_index = int(input("Enter the index of the request to reject: ").strip())
-            if request_index < 0 or request_index >= len(self.incoming_requests):
-                print("Invalid index. Returning to menu.")
-                return
-
-            conn, addr = self.incoming_requests[request_index]
-            conn.send("CONNECTION_REJECTED".encode())
-            print(f"Connection request from {addr} rejected.")
-            self.incoming_requests.pop(request_index)
-        except Exception as e:
-            print(f"Error rejecting request: {e}")
-    
-    # Listener Methods
-    def start_listening(self):
-        try:
-            self.listen_sock.bind(("0.0.0.0", self.listen_port))
-            self.listen_sock.listen(5)
-            print(f"Listening for incoming requests on port {self.listen_port}...")
-            threading.Thread(target=self.handle_incoming_connections, daemon=True).start()
-        except Exception as e:
-            print(f"Error starting listener: {e}")
-
-    def handle_incoming_connections(self):
-        while True:
-            try:
-                conn, addr = self.listen_sock.accept()
-                print(f"Incoming connection from {addr}")
-                threading.Thread(target=self.handle_peer_request, args=(conn, addr), daemon=True).start()
-            except Exception as e:
-                print(f"Error accepting connection: {e}")
-
-    def handle_peer_request(self, conn, addr):
-        try:
-            data = conn.recv(1024).decode()
-            command, *args = data.split()
-
-            if command == "REQUEST":
-                self.send_file(conn, args[0])
-            elif command == "GET_SIZE":
-                self.send_file_size(conn, args[0])
-            elif command == "CONNECTION_REQUEST":
-                self.store_incoming_request(conn, addr)
-            else:
-                conn.send("ERROR: Unknown command".encode())
-        except Exception as e:
-            print(f"Error handling request from {addr}: {e}")
-        finally:
-            conn.close()
-
-    def handle_request_peer(self, client_socket, target_username):
-        # Find the target peer in the list of connected clients
-        target_peer = self.find_peer_by_username(target_username)
-
-        if target_peer:
-            # Notify the target peer of the incoming connection request
-            target_peer.socket.send(f"CONNECTION_REQUEST from {client_socket.username}".encode())
-            client_socket.send(f"PEER_FOUND {target_peer.username} {target_peer.ip} {target_peer.listen_port}".encode())
+        if response == "LOGIN_SUCCESS":
+            print(Fore.GREEN + "Login successful!")
+            self.username = username
+            # Set the user's directory
+            self.local_files_dir = os.path.join("client_files", self.username)
+            os.makedirs(self.local_files_dir, exist_ok=True)
+            return True
         else:
-            client_socket.send("PEER_NOT_FOUND".encode())
+            print(Fore.RED + "Invalid credentials. Please try again.")
+            input(Fore.YELLOW + "Press Enter to return to the main menu...")
+            return False
 
-
-    def handle_connection_request(self, conn, addr):
-        print(f"Incoming connection request from {addr}")
-        # accept or reject connection 
-        response = input("Accept connection? (yes/no): ").strip().lower()
-        if response == "yes":
-            conn.send("CONNECTION_ACCEPTED".encode())
-            print(f"Connection with {addr} accepted.")
-        else:
-            conn.send("CONNECTION_REJECTED".encode())
-            print(f"Connection with {addr} rejected.")
-
-    # File Transfer
-    def send_file(self, conn, filename):
-        try:
-            file_path = os.path.join(self.local_file_directory, filename)
-            if not os.path.exists(file_path):
-                conn.send(f"ERROR: File not found: {filename}".encode())
-                return
-            with open(file_path, "rb") as f:
-                print(f"Sending file: {filename}")
-                while chunk := f.read(1024):
-                    conn.send(chunk)
-            print(f"File {filename} sent successfully.")
-        except Exception as e:
-            print(f"Error sending file: {e}")
-
-    def send_file_size(self, conn, filename):
-        try:
-            file_path = os.path.join(self.local_file_directory, filename)
-            if not os.path.exists(file_path):
-                conn.send(f"ERROR: File not found: {filename}".encode())
-                return
-            file_size = os.path.getsize(file_path)
-            conn.send(str(file_size).encode())
-        except Exception as e:
-            print(f"Error sending file size: {e}")
-
-    def request_file_from_peer(self, peer_ip, peer_port, filename):
-        try:
-            print(f"Attempting to connect to peer {peer_ip}:{peer_port}...")
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as peer_sock:
-                peer_sock.connect((peer_ip, peer_port))
-
-                print("Requesting file size...")
-                peer_sock.send(f"GET_SIZE {filename}".encode())
-                file_size = int(peer_sock.recv(1024).decode())
-
-                print(f"File size received: {file_size} bytes.")
-                file_path = os.path.join(self.local_file_directory, f"downloaded_{filename}")
-                with open(file_path, "wb") as f, tqdm(total=file_size, unit="B", unit_scale=True) as pbar:
-                    print(f"Downloading {filename} from {peer_ip}:{peer_port}...")
-                    while data := peer_sock.recv(1024):
-                        f.write(data)
-                        pbar.update(len(data))
-                print(f"File {filename} downloaded successfully.")
-        except Exception as e:
-            print(f"Failed to request file from peer: {e}")
-
-    def store_incoming_request(self, conn, addr):
-        print(f"Storing incoming connection request from {addr}.")
-        self.incoming_requests.append((conn, addr))
-        print(f"Current incoming requests: {self.incoming_requests}")
-
-    # Commands
-    def send_command(self, command):
-        try:
-            self.cli_sock.send(command.encode())
-            response = self.cli_sock.recv(1024).decode()
-            print(f"\nServer response:\n{response}")
-            return response
-        except Exception as e:
-            print(f"Error sending command: {e}")
-            return f"Error: {e}"
-
-    def handle_index(self, filename, listen_port, username):
-        if not os.path.exists(filename):
-            print(f"File {filename} doesn't exist.")
-            return
-        response = self.send_command(f"INDEX {filename} {username} {listen_port}")
-        print(f"Indexing response: {response}")
-        
-    def list_peers(self):
-        self.send_command("LIST_PEERS")
-
-    def list_files(self):
-        self.send_command("LIST_FILES")
-
-    def list_incoming_requests(self):
-        if not self.incoming_requests:
-            print("\nNo incoming requests.")
-        else:
-            print("\nIncoming Requests:")
-            for idx, (conn, addr) in enumerate(self.incoming_requests):
-                print(f"{idx}. From {addr}")
-
-    def clear_incoming_requests(self):
-        command = "CLEAR_INCOMING_REQUESTS"
-        response = self.send_command(command)
-        if response != "INCOMING_REQUESTS_CLEARED":
-            print("Failed to clear incoming requests.")
-
-    def accept_incoming_request(self):
-        if not self.incoming_requests:
-            print("\nNo incoming requests to accept.")
-            return
-
-        try:
-            request_index = int(input("\nEnter the index of the request to accept: ").strip())
-
-            if request_index < 0 or request_index >= len(self.incoming_requests):
-                print("Invalid index. Returning to menu.")
-                return
-
-            conn, addr = self.incoming_requests[request_index]
-            print(f"Accepting connection from {addr}")
-            conn.send("CONNECTION_ACCEPTED".encode())  # Send acceptance message
-            print(f"Connection with {addr} accepted.")
-
-            # Remove the handled request from the list
-            del self.incoming_requests[request_index]
-
-        except ValueError:
-            print("Invalid input. Returning to menu.")
-
-    # User Interface
-    def main_menu(self):
-        while True:
-            print("\n==============================")
+    def ensure_login(self):
+        while not self.username:
+            self.clear_screen()
+            print(Fore.MAGENTA + "\n==============================")
             print("          MAIN MENU           ")
             print("==============================")
             print("[1] 🔑 Login")
             print("[2] 📝 Register")
             print("[3] ❌ Exit")
             print("==============================")
-
-            choice = input("Enter your choice (1-3): ").strip()
-
+            choice = input("Choose an option: ").strip()
             if choice == "1":
-                self.handle_login()
+                if self.login():
+                    break
             elif choice == "2":
-                self.handle_registration()
+                self.register()
             elif choice == "3":
-                self.disconnect()
-                break
+                self.server_socket.close()
+                exit(0)
             else:
-                print("Invalid option. Please try again.")
+                print(Fore.RED + "Invalid choice. Try again.")
 
-    def login(self, username, password):
-        command = f"LOGIN {username} {password}"
-        response = self.send_command(command)
-        return response == "LOGIN_SUCCESS"
+    def index_file(self):
+        files = os.listdir(self.local_files_dir)
+        if not files:
+            print(Fore.YELLOW + f"No files found in your directory: {self.local_files_dir}")
+            input(Fore.YELLOW + "Press Enter to return to the menu...")
+            return
 
-    def register(self, username, password):
-        command = f"REGISTER {username} {password}"
-        response = self.send_command(command)
-        return response == "REGISTER_SUCCESS"
+        print(Fore.CYAN + f"Files in your directory ({self.local_files_dir}):")
+        for idx, file in enumerate(files, start=1):
+            print(Fore.CYAN + f"[{idx}] {file}")
 
-    def handle_login(self):
-        username = input("\nEnter your username: ")
-        password = pwinput.pwinput(prompt="Enter your password: ")
-        if self.login(username, password):
-            self.logged_in_menu(username)
+        try:
+            choice = int(input("Enter the number of the file you want to index: ").strip())
+            if choice < 1 or choice > len(files):
+                print(Fore.RED + "Invalid choice. Please try again.")
+                input(Fore.YELLOW + "Press Enter to return to the menu...")
+                return
+
+            filename = files[choice - 1]
+            file_path = os.path.join(self.local_files_dir, filename)
+
+            aes_key = generate_AES_key()
+            encrypted_file_path = aes_encrypt_file(file_path, aes_key)
+            save_key(aes_key, os.path.join(self.local_files_dir, f"{filename}_key.json"))  # Save AES key
+
+            file_hash = hash_file(encrypted_file_path)
+
+            # Send INDEX command with file hash
+            self.server_socket.send(f"INDEX {self.username} {filename} {socket.gethostbyname(socket.gethostname())} 5000 {file_hash}".encode())
+            response = self.server_socket.recv(1024).decode()
+
+            if response == "INDEX_SUCCESS":
+                print(Fore.GREEN + f"File '{filename}' indexed successfully!")
+            else:
+                print(Fore.RED + f"Failed to index file '{filename}'. Server response: {response}")
+        except ValueError:
+            print(Fore.RED + "Invalid input. Please enter a number.")
+        except Exception as e:
+            print(Fore.RED + f"Error indexing file: {e}")
+
+        input(Fore.YELLOW + "Press Enter to return to the menu...")
+
+    def decrypt_file(self):
+        encrypted_file = input("Enter the path of the encrypted file: ").strip()
+        aes_key = load_key(os.path.join(self.local_files_dir, f"{os.path.basename(encrypted_file)}_key.json"))
+        if not aes_key:
+            print(Fore.RED + "AES key not found for this file.")
+            return
+
+        try:
+            decrypted_file_path = aes_decrypt_file(encrypted_file, aes_key)
+            print(Fore.GREEN + f"File decrypted successfully: {decrypted_file_path}")
+        except ValueError as e:
+            print(Fore.RED + f"Decryption failed: {e}")
+
+        input(Fore.YELLOW + "Press Enter to return to the menu...")
+
+    def list_files(self):
+        # List all files in the user's directory
+        files = os.listdir(self.local_files_dir)
+        if not files:
+            print(Fore.YELLOW + f"No files found in your directory: {self.local_files_dir}")
         else:
-            print("Invalid credentials. Please try again.")
-
-    def handle_registration(self):
-        username = input("\nEnter your new username: ")
-        password = pwinput.pwinput(prompt="Enter your new password: ")
-        self.register(username, password)
-
-    def logged_in_menu(self, username):
-        while True:
-            print("\n===================================")
-            print(f"   WELCOME, {username.upper()}!")
-            print("===================================")
-            print("[1] 🔗 Connect")
-            print("[2] 📤 Index a File")
-            print("[3] 📂 List Indexed Files")
-            print("[4] 🔙 Logout")
-            print("===================================")
-
-            action = input("Enter your choice (1-4): ").strip()
-
-            if action == "1":
-                print("\nMoving to Connect Menu...")
-                self.connect_menu()
-            elif action == "2":
-                filename = input("Enter file path to upload: ")
-                self.handle_index(filename, self.listen_port, username)
-            elif action == "3":
-                self.list_files()
-            elif action == "4":
-                print("\nLogging out...")
-                break
-            else:
-                print("\nInvalid option. Please try again.")
-            
-    def connect_menu(self):
-        while True:
-            print("\n==============================")
-            print("        CONNECT MENU          ")
-            print("==============================")
-            print("[1] 🟢 List Active Peers")
-            print("[2] 📩 Manage Incoming Requests")
-            print("[3] 🤝 Send Connection Request")
-            print("[4] 🔙 Back to Main Menu")
-            print("==============================")
-
-            connect_action = input("Enter your choice (1-4): ").strip()
-
-            if connect_action == "1":
-                self.list_peers()
-            elif connect_action == "2":
-                print("\nMoving to Manage Incoming Request Menu...")
-                self.manage_incoming_requests()
-            elif connect_action == "3":
-                peer_username = input("Enter the peer's username: ")
-                print(f"\nconnection request to {peer_username}...")
-                response = self.send_command(f"REQUEST_PEER {peer_username}")
-
-                if response.startswith("PEER_NOT_FOUND"):
-                    print(f"Peer '{peer_username}' not found. Returning to menu.")
-                    continue
-                elif response.startswith("PEER_FOUND"):
-                    _, username, peer_ip, peer_port = response.split()
-                    peer_port = int(peer_port)
-
-                    print(f"Peer '{username}' found at {peer_ip}:{peer_port}. Waiting for acceptance...")
-                    self.wait_for_peer_acceptance(peer_username, peer_ip, peer_port)
+            print(Fore.CYAN + f"Current files in your directory ({self.local_files_dir}):")
+            for file in files:
+                # Display each file with its type
+                if file.endswith(".enc"):
+                    print(Fore.GREEN + f"  {file} (Encrypted)")
+                elif file.endswith(".json"):
+                    print(Fore.MAGENTA + f"  {file} (Key File)")
                 else:
-                    print(f"Unexpected response: {response}")
-            elif connect_action == "4":
-                print("\nReturning to Main Menu...")
-                break
+                    print(Fore.WHITE + f"  {file} (Plaintext)")
+
+        input(Fore.YELLOW + "Press Enter to return to the menu...")
+
+    def search_file(self):
+        query = input("Enter filename to search: ").strip()
+        self.server_socket.send(f"SEARCH {query}".encode())
+        try:
+            response = self.server_socket.recv(1024).decode()
+            files = json.loads(response)
+
+            if files:
+                print(Fore.GREEN + f"Files matching '{query}':")
+                for file in files:
+                    print(Fore.CYAN + f"- {file['filename']} (Peer: {file['ip']}:{file['port']})")
             else:
-                print("\nInvalid option. Please try again.")
+                print(Fore.YELLOW + f"No files found matching the keyword '{query}'.")
+        except json.JSONDecodeError:
+            print(Fore.RED + "Error decoding server response. The data might be corrupted.")
+        except Exception as e:
+            print(Fore.RED + f"An unexpected error occurred during search: {e}")
 
-    def manage_incoming_requests(self):
-        while True:
-            print("\n===================================")
-            print("  MANAGE INCOMING REQUESTS MENU   ")
-            print("===================================")
-            print("[1] 📋 List Incoming Requests")
-            print("[2] ✅ Accept Incoming Request")
-            print("[3] ❌ Reject Incoming Request")
-            print("[4] 🔙 Return to Previous Menu")
-            print("===================================")
+        input(Fore.YELLOW + "Press Enter to return to the menu...")
 
-            try:
-                request_choice = int(input("Enter your choice (1-4): ").strip())
+    def send_file(self, peer_socket, file_path):
+        aes_key = generate_AES_key()
+        encrypted_file_path = aes_encrypt_file(file_path, aes_key)
+        save_key(aes_key, f"{os.path.basename(file_path)}_key.json")
 
-                if request_choice == 1:
-                    self.list_incoming_requests()
-                elif request_choice == 2:
-                    self.accept_incoming_request()
-                elif request_choice == 3:
-                    self.reject_incoming_request()
-                elif request_choice == 4:
-                    print("\nReturning to previous menu...")
+        with open(encrypted_file_path, "rb") as file:
+            peer_socket.sendall(file.read())
+        print(f"Encrypted file sent: {encrypted_file_path}")
+
+    def receive_file(self, file_path):
+        aes_key = load_key(f"{os.path.basename(file_path)}_key.json")
+        if not aes_key:
+            print("AES key not available for decryption.")
+            return
+
+        decrypted_file_path = aes_decrypt_file(file_path, aes_key)
+        print(f"Received file decrypted: {decrypted_file_path}")
+
+    def validate_file_index(self):
+        filename = input("Enter the filename to validate: ").strip()
+        self.server_socket.send(f"VERIFY_INDEX {filename}".encode())
+        response = self.server_socket.recv(1024).decode()
+
+        if response == "INDEX_VALID":
+            print(Fore.GREEN + f"The file index for '{filename}' is valid.")
+        elif response == "FILE_NOT_FOUND":
+            print(Fore.YELLOW + f"No index entry found for '{filename}'. It might not be indexed yet.")
+        elif response == "INDEX_INVALID":
+            print(Fore.RED + f"The file index for '{filename}' is invalid or tampered.")
+        else:
+            print(Fore.RED + f"Unexpected server response: {response}")
+
+    def request_file(self, peer_ip, peer_port, filename):
+        try:
+            # Establish secure connection to the peer
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.load_verify_locations("server_cert.pem")
+            peer_socket = socket.create_connection((peer_ip, peer_port))
+            secure_peer_socket = context.wrap_socket(peer_socket, server_hostname=peer_ip)
+
+            # Request file from the peer
+            secure_peer_socket.send(f"REQUEST {filename}".encode())
+            response = secure_peer_socket.recv(1024).decode()
+
+            if response == "FILE_NOT_FOUND":
+                print(Fore.YELLOW + f"Peer does not have the file '{filename}'.")
+            elif response.startswith("READY"):
+                aes_key_encrypted = secure_peer_socket.recv(256)  # Receive encrypted AES key
+                aes_key = rsa_decrypt(aes_key_encrypted, self.private_key)
+
+                # Receive file in chunks
+                file_path = os.path.join(self.local_files_dir, filename)
+                with open(file_path, "wb") as file:
+                    print(Fore.GREEN + f"Receiving file '{filename}' from {peer_ip}:{peer_port}...")
+                    while True:
+                        chunk = secure_peer_socket.recv(4096)
+                        if not chunk:
+                            break
+                        file.write(chunk)
+                    print(Fore.CYAN + f"File '{filename}' received successfully.")
+
+                # Decrypt the file
+                decrypted_file_path = aes_decrypt_file(file_path, aes_key)
+                print(Fore.GREEN + f"File '{filename}' decrypted and saved as '{decrypted_file_path}'.")
+            else:
+                print(Fore.RED + "Unexpected response from peer.")
+        except Exception as e:
+            print(Fore.RED + f"Error during file request: {e}")
+        finally:
+            secure_peer_socket.close()
+
+    def serve_file(self, client_socket):
+        try:
+            data = client_socket.recv(1024).decode()
+            command, filename = data.split()
+
+            if command == "REQUEST":
+                file_path = os.path.join(self.local_files_dir, filename)
+                if not os.path.exists(file_path):
+                    client_socket.send(b"FILE_NOT_FOUND")
                     return
-                else:
-                    print("Invalid choice. Please try again.")
-            except ValueError:
-                print("Invalid input. Please enter a number.")
-                
-    def file_exchange(self, peer_username):
-        print(f"Starting file exchange with {peer_username}...")
+
+                # Encrypt the file
+                aes_key = generate_AES_key()
+                encrypted_file_path = aes_encrypt_file(file_path, aes_key)
+
+                # Send AES key encrypted with the recipient's public key
+                aes_key_encrypted = rsa_encrypt(aes_key, self.peer_public_key)  # Assumes you have the peer's public key
+                client_socket.send(b"READY")
+                client_socket.send(aes_key_encrypted)
+
+                # Send file in chunks
+                with open(encrypted_file_path, "rb") as file:
+                    print(Fore.GREEN + f"Sending file '{filename}'...")
+                    while chunk := file.read(4096):
+                        client_socket.send(chunk)
+                    print(Fore.CYAN + f"File '{filename}' sent successfully.")
+        except Exception as e:
+            print(Fore.RED + f"Error serving file: {e}")
+
+    def request_file_menu(self):
+        try:
+            peer_ip = input("Enter the peer's IP address: ").strip()
+            if not peer_ip:
+                print(Fore.RED + "Peer IP address cannot be empty.")
+                return
+
+            while True:
+                peer_port_input = input("Enter the peer's port: ").strip()
+                if not peer_port_input.isdigit():  # Validate numeric input
+                    print(Fore.RED + "Port must be a valid number. Please try again.")
+                    continue
+                peer_port = int(peer_port_input)
+                break
+
+            filename = input("Enter the filename you want to request: ").strip()
+            if not filename:
+                print(Fore.RED + "Filename cannot be empty.")
+                return
+
+            print(Fore.YELLOW + f"Attempting to request file '{filename}' from {peer_ip}:{peer_port}...")
+
+            # Connect to the peer and request the file
+            self.request_file_from_peer(peer_ip, peer_port, filename)
+
+        except ValueError as e:
+            print(Fore.RED + f"Invalid input: {e}")
+        except Exception as e:
+            print(Fore.RED + f"An error occurred: {e}")
+
+    def start_peer_listener(self):
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.bind((self.server_ip, self.server_port))
+        server_socket.listen(5)
+        print(Fore.GREEN + f"Peer listening on {self.server_ip}:{self.server_port}...")
+
         while True:
-            print("\nFile Exchange Options:")
-            print("[1] Send a File")
-            print("[2] Request a File")
-            print("[3] End File Exchange")
+            client_socket, client_address = server_socket.accept()
+            threading.Thread(target=self.serve_file, args=(client_socket,), daemon=True).start()
 
-            exchange_action = input("\nEnter your choice: ").strip()
+    def main_menu(self):
+        self.connect_to_server()
+        self.ensure_login()
+        threading.Thread(target=self.start_peer_listener, daemon=True).start()  # Start serving files in the background
 
-            if exchange_action == "1":
-                filename = input("Enter the file name to send: ")
-                self.send_file(self.cli_sock, filename)  # Update as needed for specific socket
-            elif exchange_action == "2":
-                filename = input("Enter the file name to request: ")
-                peer_ip = input("Enter the peer's IP address: ")
-                peer_port = int(input("Enter the peer's port: "))
-                self.request_file_from_peer(peer_ip, peer_port, filename)
-            elif exchange_action == "3":
-                print("Ending file exchange...")
+        while True:
+            self.clear_screen()
+            print(Fore.CYAN + "\n===================================")
+            print(f"   WELCOME, {self.username.upper()}!")
+            print("===================================")
+            print("[1] 📤 Index File")
+            print("[2] 📂 Search File")
+            print("[3] 🔄 Request File from Peer")
+            print("[4] 🛡️  Validate File Index")
+            print("[5] 📜 List My Files")
+            print("[6] 🔙 Exit")
+            print("===================================")
+            choice = input("Choose an option: ").strip()
+            if choice == "1":
+                self.index_file()
+            elif choice == "2":
+                self.search_file()
+            elif choice == "3":
+                self.request_file_menu()
+            elif choice == "4":
+                self.validate_file_index()
+            elif choice == "5":
+                self.list_files()
+            elif choice == "6":
+                print(Fore.YELLOW + "Exiting client...")
+                self.server_socket.close()
                 break
             else:
-                print("Invalid option. Please try again.")
-
+                print(Fore.RED + "Invalid choice. Try again.")
+                input(Fore.YELLOW + "Press Enter to return to the menu...")
 
 if __name__ == "__main__":
-    
-    '''
-    # Generate RSA keys for client
-    private_key, public_key = generate_RSA_keypair()
-    print("\nClient RSA Private Key:")
-    print(private_key.decode())
-    sys.stdout.flush()
-    print("\nClient RSA Public Key:")
-    print(public_key.decode())
-    sys.stdout.flush()
-    print("")
-    '''
-    
-    client = Client(server_ip="127.0.0.1", port_number=49152)
-    client.connect()  # If connection fails, exit
-
-    client.start_listening() # Listen for incoming connections from other peers
-
+    client = Client()
     client.main_menu()
+

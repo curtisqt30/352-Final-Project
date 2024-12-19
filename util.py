@@ -16,64 +16,71 @@ import hashlib  # for hashing
 import json # for database storage
 import threading
 
-# AES Functions using CTR mode
 def aes_encrypt_file(file_path, key):
-    # Generate a random nonce for counter
-    nonce = get_random_bytes(AES.block_size)
-    ctr = Counter.new(128, nonce=nonce) 
+    try:
+        # Generate a random 8-byte nonce for CTR mode
+        nonce = get_random_bytes(8)
+        ctr = Counter.new(64, prefix=nonce, initial_value=0)
 
-    cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
-    
-    # Read file and encrypt
-    with open(file_path, 'rb') as file:
-        plaintext = file.read()
-        ciphertext = cipher.encrypt(plaintext)
-    
-    # Generate HMAC based on the ciphertex
-    hmac = HMAC.new(key, ciphertext, SHA256)
-    hmac_digest = hmac.digest()
-    
-    # Save the nonce (counter), ciphertext, and HMAC
-    encrypted_file_path = file_path + ".enc"
-    with open(encrypted_file_path, 'wb') as enc_file:
-        enc_file.write(nonce)  # Store the nonce at the start
-        enc_file.write(ciphertext)
-        enc_file.write(hmac_digest)  # Append the HMAC to end
-    
-    return encrypted_file_path
+        cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+
+        # Read plaintext and encrypt
+        with open(file_path, 'rb') as file:
+            plaintext = file.read()
+            ciphertext = cipher.encrypt(plaintext)
+
+        # Generate HMAC for integrity
+        hmac = HMAC.new(key, ciphertext, SHA256)
+        hmac_digest = hmac.digest()
+
+        # Save nonce, ciphertext, and HMAC
+        encrypted_file_path = file_path + ".enc"
+        with open(encrypted_file_path, 'wb') as enc_file:
+            enc_file.write(nonce)  # Store nonce first
+            enc_file.write(ciphertext)  # Store encrypted data
+            enc_file.write(hmac_digest)  # Append HMAC
+
+        return encrypted_file_path
+    except Exception as e:
+        raise ValueError(f"Encryption failed: {e}")
 
 def aes_decrypt_file(encrypted_file_path, key):
-    # Read encrypted file
-    with open(encrypted_file_path, 'rb') as enc_file:
-        nonce = enc_file.read(AES.block_size)  # Read the nonce
-        ciphertext = enc_file.read(-32)  # Read the ciphertext 
-        stored_hmac = enc_file.read()  # Read the HMAC
-
-    # Verify HMAC
-    hmac = HMAC.new(key, ciphertext, SHA256)
     try:
-        hmac.verify(stored_hmac)
-    except ValueError:
-        raise ValueError("HMAC verification failed. Data may have been tampered with.")
-    
-    # Create a counter from nonce
-    ctr = Counter.new(128, nonce=nonce)
+        # Read encrypted file
+        with open(encrypted_file_path, 'rb') as enc_file:
+            nonce = enc_file.read(8)  # Read 8-byte nonce
+            ciphertext = enc_file.read(-32)  # Read ciphertext
+            stored_hmac = enc_file.read()  # Read the HMAC
 
-    # Decrypt ciphertext
-    cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
-    decrypted_data = cipher.decrypt(ciphertext)
+        # Verify HMAC for integrity
+        hmac = HMAC.new(key, ciphertext, SHA256)
+        try:
+            hmac.verify(stored_hmac)
+        except ValueError:
+            raise ValueError("HMAC verification failed. Data may have been tampered with.")
 
-    # Save decrypted file
-    decrypted_file_path = encrypted_file_path[:-4]
-    with open(decrypted_file_path, 'wb') as dec_file:
-        dec_file.write(decrypted_data)
+        # Create counter from nonce
+        ctr = Counter.new(64, prefix=nonce, initial_value=0)
 
-    return decrypted_file_path
+        # Decrypt ciphertext
+        cipher = AES.new(key, AES.MODE_CTR, counter=ctr)
+        decrypted_data = cipher.decrypt(ciphertext)
+
+        # Save decrypted file
+        decrypted_file_path = encrypted_file_path[:-4] 
+        with open(decrypted_file_path, 'wb') as dec_file:
+            dec_file.write(decrypted_data)
+
+        return decrypted_file_path
+    except Exception as e:
+        raise ValueError(f"Decryption failed: {e}")
 
 def generate_AES_key():
-    # Generate a 256-bit key
-    key = get_random_bytes(32)
-    return key
+    try:
+        key = get_random_bytes(32)
+        return key
+    except Exception as e:
+        raise ValueError(f"Key generation failed: {e}")
 
 # General Hashing using SHA 256  (AES already implemented with HMAC)
 def hash_file(file_path):
