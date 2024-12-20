@@ -171,9 +171,7 @@ def save_database(data, filename="db_filepaths.json"):
 # RSA Functions
 def generate_RSA_keypair(key_size=2048):
     key = RSA.generate(key_size)
-    private_key = key.export_key()
-    public_key = key.publickey().export_key()
-    return private_key, public_key
+    return key, key.publickey()
 
 def rsa_encrypt(data, public_key):
     pub_key = RSA.import_key(public_key)
