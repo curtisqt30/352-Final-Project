@@ -323,38 +323,51 @@ class Client:
 
     def serve_file(self, client_socket):
         try:
+            # Receive command and filename from the client
             data = client_socket.recv(1024).decode()
             command, filename = data.split()
 
             if command == "REQUEST":
                 file_path = os.path.join(self.local_files_dir, filename)
+
+                # Check if the requested file exists
                 if not os.path.exists(file_path):
                     client_socket.send(b"FILE_NOT_FOUND")
+                    print(Fore.RED + f"File '{filename}' not found for transfer.")
                     return
 
                 print(Fore.YELLOW + f"Incoming request for '{filename}' from {client_socket.getpeername()}.")
-                confirm = input(Fore.CYAN + "Allow transfer? (y/n): ").strip().lower()
+
+                # Confirm file transfer
+                confirm = input(Fore.CYAN + f"Allow transfer of '{filename}'? (y/n): ").strip().lower()
                 if confirm != 'y':
                     client_socket.send(b"REQUEST_DENIED")
+                    print(Fore.RED + f"Transfer of '{filename}' denied.")
                     return
 
-                # Encrypt the file and prepare for transfer
+                # Encrypt the file
                 aes_key = generate_AES_key()
                 encrypted_file_path = aes_encrypt_file(file_path, aes_key)
 
-                # Send AES key encrypted with the recipient's public key
-                aes_key_encrypted = rsa_encrypt(aes_key, self.peer_public_key)  # Assumes you have the peer's public key
+                # Assume the peer's public key is available for encryption
+                peer_public_key = self.peer_public_key  # Ensure this is defined elsewhere in the class
+                aes_key_encrypted = rsa_encrypt(aes_key, peer_public_key)
+
+                # Send READY signal and encrypted AES key
                 client_socket.send(b"READY")
                 client_socket.send(aes_key_encrypted)
 
-                # Send file in chunks
+                # Send the encrypted file in chunks
                 with open(encrypted_file_path, "rb") as file:
                     print(Fore.GREEN + f"Sending file '{filename}'...")
                     while chunk := file.read(4096):
                         client_socket.send(chunk)
                     print(Fore.CYAN + f"File '{filename}' sent successfully.")
+            else:
+                print(Fore.RED + f"Invalid command received: {command}")
+                client_socket.send(b"INVALID_COMMAND")
         except Exception as e:
-            print(Fore.RED + f"Error serving file: {e}")
+            print(Fore.RED + f"Error during file transfer: {e}")
         finally:
             client_socket.close()
 

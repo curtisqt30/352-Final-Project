@@ -41,6 +41,10 @@ database_lock = threading.Lock()
 pending_requests = {}  # {"username": [{"filename": ..., "requester": ..., "ip": ..., "port": ...}]}
 pending_requests_lock = threading.Lock()
 
+# request queue
+request_queue = []
+request_queue_lock = threading.Lock()
+
 # Track active peers
 active_peers = {}
 active_peers_lock = threading.Lock()
@@ -157,29 +161,56 @@ def handle_client(client_socket, client_address):
                     file_info = database["file_index"].get(filename, None)
 
                 if file_info:
-                    # Add the request to the queue
-                    request_queue.append({
-                        "requester": requester,
-                        "filename": filename,
-                        "peer_ip": peer_ip,
-                        "peer_port": file_info["port"],
-                    })
+                    owner = file_info["username"]  # The owner of the file
+
+                    with pending_requests_lock:
+                        if owner not in pending_requests:
+                            pending_requests[owner] = []  # Initialize if not already present
+                        pending_requests[owner].append({
+                            "requester": requester,
+                            "filename": filename,
+                            "peer_ip": peer_ip,
+                            "peer_port": file_info["port"],
+                        })
+
                     client_socket.send(b"REQUEST_QUEUED")
                     logging.info(f"File request for '{filename}' queued.")
                 else:
                     client_socket.send(b"FILE_NOT_FOUND")
-                    logging.warning(f"File '{filename}' not found for request.")
 
             elif command == "REQUEST_QUEUE":
                 try:
                     # Retrieve the pending requests for this user
-                    pending_requests = [] 
-                    response = json.dumps(pending_requests)
+                    with pending_requests_lock:
+                        user_requests = pending_requests.get(username, [])
+                    response = json.dumps(user_requests)
                     client_socket.send(response.encode())
                     logging.info(f"Pending requests sent to {username}: {response}")
                 except Exception as e:
                     logging.error(f"Error handling REQUEST_QUEUE for {username}: {e}")
                     client_socket.send(b"[]")  # Send an empty list if there's an error
+
+            elif command == "APPROVE_REQUEST":
+                if len(args) != 2:
+                    client_socket.send(b"INVALID_ARGS")
+                    continue
+                filename, requester = args
+
+                with pending_requests_lock:
+                    user_requests = pending_requests.get(username, [])
+                    request = next((req for req in user_requests if req["filename"] == filename and req["requester"] == requester), None)
+
+                    if request:
+                        # Notify the requester
+                        requester_socket = active_peers[requester]["socket"] 
+                        requester_socket.send(b"READY")
+                        # Remove the request from the queue
+                        pending_requests[username] = [req for req in user_requests if req != request]
+                        client_socket.send(b"REQUEST_APPROVED")
+                        logging.info(f"Request for '{filename}' from {requester} approved by {username}.")
+                    else:
+                        client_socket.send(b"REQUEST_NOT_FOUND")
+                        logging.warning(f"No matching request found for '{filename}' from '{requester}'.")
 
             elif command == "SEARCH":
                 if len(args) != 1:
