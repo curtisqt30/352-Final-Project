@@ -6,22 +6,43 @@ import ssl
 import threading
 import time
 import pwinput
+import random
+import base64
+import logging
 from colorama import Fore, Style, init
 from util import (
     hash_file,
     aes_encrypt_file,
     aes_decrypt_file,
+    generate_AES_key,
+    store_password,
+    load_stored_password,
+    verify_password,
+    load_json,
+    save_json,
+    load_database,
+    save_database,
+    generate_RSA_keypair,
     rsa_encrypt,
     rsa_decrypt,
+    sign_data_rsa,
     verify_signature_rsa,
-    generate_AES_key,
+    sign_data_dsa,
+    generate_DSA_keypair,
+    verify_signature_dsa,
     save_key,
     load_key,
 )
 
+# Initialize logging and colorama
+logging.basicConfig(
+    filename="client.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 init(autoreset=True)
 
-SERVER_PUBLIC_KEY = None  # Retrieve dynamically after connecting
+SERVER_PUBLIC_KEY = None
 
 class Client:
     def __init__(self, server_ip="127.0.0.1", server_port=49152):
@@ -29,28 +50,31 @@ class Client:
         self.server_port = server_port
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.local_files_dir = "client_files"
-        self.username = None  # To track logged-in user
+        self.username = None
+        self.signature_algorithm = None
         os.makedirs(self.local_files_dir, exist_ok=True)
 
     def clear_screen(self):
         os.system("cls" if os.name == "nt" else "clear")
 
     def connect_to_server(self):
-        try:
-            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-            context.load_verify_locations("server_cert.pem")
-            self.server_socket = context.wrap_socket(self.server_socket, server_hostname=self.server_ip)
-            self.server_socket.connect((self.server_ip, self.server_port))
-            print(Fore.GREEN + f"Connected securely to server at {self.server_ip}:{self.server_port}")
-        except ssl.SSLError as ssl_err:
-            print(Fore.RED + f"SSL Error: {ssl_err}. Ensure the server certificate is valid and accessible.")
-            exit(1)
-        except FileNotFoundError:
-            print(Fore.RED + "Certificate file not found. Please check 'server_cert.pem'.")
-            exit(1)
-        except Exception as e:
-            print(Fore.RED + f"Failed to connect to server: {e}")
-            exit(1)
+        retries = 3
+        for attempt in range(retries):
+            try:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                context.load_verify_locations("server_cert.pem")
+                self.server_socket = context.wrap_socket(self.server_socket, server_hostname=self.server_ip)
+                self.server_socket.connect((self.server_ip, self.server_port))
+                print(Fore.GREEN + f"Connected securely to server at {self.server_ip}:{self.server_port}")
+                return
+            except ssl.SSLError as ssl_err:
+                print(Fore.RED + f"SSL Error: {ssl_err}. Retrying ({attempt + 1}/{retries})...")
+                time.sleep(1)
+            except Exception as e:
+                print(Fore.RED + f"Failed to connect to server: {e}")
+                time.sleep(1)
+        print(Fore.RED + "Failed to connect to the server after multiple attempts.")
+        exit(1)
 
     def send_file_with_hash(self, peer_socket, file_path):
         aes_key = generate_AES_key()
@@ -67,6 +91,43 @@ class Client:
             peer_socket.sendall(file.read())
         print(f"Encrypted file and hash sent: {encrypted_file_path}")
 
+    def sign_file(self, file_path, private_key):
+        file_hash = hash_file(file_path).encode()
+        if self.signature_algorithm == "RSA":
+            return sign_data_rsa(file_hash, private_key)
+        elif self.signature_algorithm == "DSA":
+            return sign_data_dsa(file_hash, private_key)
+        else:
+            raise ValueError("Invalid signature algorithm selected.")
+
+    def verify_file_signature(self, file_path, signature, public_key):
+        file_hash = hash_file(file_path).encode()
+        if self.signature_algorithm == "RSA":
+            return verify_signature_rsa(file_hash, signature, public_key)
+        elif self.signature_algorithm == "DSA":
+            return verify_signature_dsa(file_hash, signature, public_key)
+        else:
+            raise ValueError("Invalid signature algorithm selected.")
+
+    def select_signature_algorithm(self):
+            while True:
+                self.clear_screen()
+                print(Fore.CYAN + "Select Digital Signature Algorithm:")
+                print(Fore.CYAN + "[1] RSA")
+                print(Fore.CYAN + "[2] DSA")
+                choice = input("Enter your choice: ").strip()
+                if choice == "1":
+                    self.signature_algorithm = "RSA"
+                    print(Fore.GREEN + "RSA selected for digital signatures.")
+                    break
+                elif choice == "2":
+                    self.signature_algorithm = "DSA"
+                    print(Fore.GREEN + "DSA selected for digital signatures.")
+                    break
+                else:
+                    print(Fore.RED + "Invalid choice. Please select 1 or 2.")
+                input(Fore.YELLOW + "Press Enter to continue...")
+
     def register(self):
         self.clear_screen()
         print(Fore.CYAN + "========== Register ==========")
@@ -79,6 +140,34 @@ class Client:
             input(Fore.YELLOW + "Press Enter to continue...")
             return
 
+        # Select signature algorithm
+        self.select_signature_algorithm()
+
+        # Generate keys based on the selected algorithm
+        try:
+            if self.signature_algorithm == "RSA":
+                private_key, public_key = generate_RSA_keypair()
+            elif self.signature_algorithm == "DSA":
+                private_key, public_key = generate_DSA_keypair()
+            else:
+                raise ValueError("Invalid signature algorithm selected.")
+
+            # Save the keys
+            private_key_path = f"{username}_private.pem"
+            public_key_path = f"{username}_public.pem"
+
+            with open(private_key_path, "wb") as priv_file:
+                priv_file.write(private_key.export_key())
+            with open(public_key_path, "wb") as pub_file:
+                pub_file.write(public_key.export_key())
+
+            print(Fore.GREEN + f"Keys generated and saved as {private_key_path} and {public_key_path}.")
+        except Exception as e:
+            print(Fore.RED + f"Error generating keys: {e}")
+            input(Fore.YELLOW + "Press Enter to return to the menu...")
+            return
+
+        # Send registration details to the server
         self.server_socket.send(f"REGISTER {username} {password}".encode())
         response = self.server_socket.recv(1024).decode()
 
@@ -88,7 +177,7 @@ class Client:
             print(Fore.RED + "Username already taken. Try again.")
         else:
             print(Fore.RED + "Registration failed. Try again.")
-        
+
         input(Fore.YELLOW + "Press Enter to return to the menu...")
 
     def login(self):
@@ -150,45 +239,52 @@ class Client:
     def index_file(self):
         files = os.listdir(self.local_files_dir)
         if not files:
-            print(Fore.YELLOW + f"No files found in your directory: {self.local_files_dir}")
-            input(Fore.YELLOW + "Press Enter to return to the menu...")
+            print(Fore.YELLOW + "No files found in your directory.")
             return
 
-        print(Fore.CYAN + f"Files in your directory ({self.local_files_dir}):")
+        print(Fore.CYAN + "Files in your directory:")
         for idx, file in enumerate(files, start=1):
             print(Fore.CYAN + f"[{idx}] {file}")
-
+        
         try:
-            choice = int(input("Enter the number of the file you want to index: ").strip())
-            if choice < 1 or choice > len(files):
-                print(Fore.RED + "Invalid choice. Please try again.")
-                input(Fore.YELLOW + "Press Enter to return to the menu...")
-                return
+            choice = int(input("Select a file to index: ").strip()) - 1
+            file_path = os.path.join(self.local_files_dir, files[choice])
 
-            filename = files[choice - 1]
-            file_path = os.path.join(self.local_files_dir, filename)
+            # Ensure the private key is loaded correctly
+            private_key = load_key(f"{self.username}_private.pem")
+            if private_key is None:
+                print(Fore.RED + "Error: Private key not found. Please ensure you are registered.")
+                return
 
             aes_key = generate_AES_key()
             encrypted_file_path = aes_encrypt_file(file_path, aes_key)
-            save_key(aes_key, os.path.join(self.local_files_dir, f"{filename}_key.json"))  # Save AES key
 
-            file_hash = hash_file(encrypted_file_path)
+            # Sign the file hash
+            signature = self.sign_file(encrypted_file_path, private_key)
 
-            # Send INDEX command with file hash
-            self.server_socket.send(f"INDEX {self.username} {filename} {socket.gethostbyname(socket.gethostname())} 5000 {file_hash}".encode())
+            # Send index data to server
+            self.server_socket.send(json.dumps({
+                "command": "INDEX",
+                "username": self.username,
+                "filename": os.path.basename(file_path),
+                "file_hash": hash_file(encrypted_file_path),
+                "aes_key": base64.b64encode(aes_key).decode(),
+                "signature": base64.b64encode(signature).decode()
+            }).encode())
+
             response = self.server_socket.recv(1024).decode()
-            print(f"Server response: {response}")
-
             if response == "INDEX_SUCCESS":
-                print(Fore.GREEN + f"File '{filename}' indexed successfully!")
+                print(Fore.GREEN + "File indexed successfully.")
             else:
-                print(Fore.RED + f"Failed to index file '{filename}'. Server response: {response}")
-        except ValueError:
-            print(Fore.RED + "Invalid input. Please enter a number.")
+                print(Fore.RED + "Failed to index file.")
+        except FileNotFoundError:
+            print(Fore.RED + "Error: Selected file not found.")
+        except ValueError as ve:
+            print(Fore.RED + f"Error: {ve}")
         except Exception as e:
-            print(Fore.RED + f"Error indexing file: {e}")
-
-        input(Fore.YELLOW + "Press Enter to return to the menu...")
+            print(Fore.RED + f"Unexpected error: {e}")
+        finally:
+            input(Fore.YELLOW + "Press Enter to return to the menu...")
 
     def decrypt_file(self):
         encrypted_file = input("Enter the path of the encrypted file: ").strip()
@@ -206,21 +302,19 @@ class Client:
         input(Fore.YELLOW + "Press Enter to return to the menu...")
 
     def list_files(self):
-        # List all files in the user's directory
+        # List files in the user's directory.
         files = os.listdir(self.local_files_dir)
         if not files:
             print(Fore.YELLOW + f"No files found in your directory: {self.local_files_dir}")
         else:
-            print(Fore.CYAN + f"Current files in your directory ({self.local_files_dir}):")
+            print(Fore.CYAN + f"Files in your directory ({self.local_files_dir}):")
             for file in files:
-                # Display each file with its type
                 if file.endswith(".enc"):
                     print(Fore.GREEN + f"  {file} (Encrypted)")
                 elif file.endswith(".json"):
                     print(Fore.MAGENTA + f"  {file} (Key File)")
                 else:
                     print(Fore.WHITE + f"  {file} (Plaintext)")
-
         input(Fore.YELLOW + "Press Enter to return to the menu...")
 
     def search_file(self):
@@ -263,111 +357,166 @@ class Client:
 
     def request_file(self, peer_ip, peer_port, filename):
         try:
+            logging.info(f"Requesting file '{filename}' from {peer_ip}:{peer_port}.")
             self.server_socket.send(f"FILE_REQUEST {self.username} {filename} {peer_ip}".encode())
             response = self.server_socket.recv(1024).decode()
-
+            logging.info(f"Server response: {response}")
             if response == "REQUEST_QUEUED":
                 print(Fore.YELLOW + f"Request for '{filename}' has been sent. Waiting for approval...")
                 self.wait_for_approval(peer_ip, peer_port, filename)
-            elif response == "FILE_NOT_FOUND":
-                print(Fore.RED + f"The file '{filename}' was not found on the peer's device.")
-            elif response == "REQUEST_DENIED":
-                print(Fore.RED + f"The peer denied your request for '{filename}'.")
             else:
-                print(Fore.RED + f"Unexpected response: {response}")
+                logging.warning(f"Unexpected response from server: {response}")
         except Exception as e:
+            logging.error(f"Error during file request: {e}")
             print(Fore.RED + f"Error during file request: {e}")
+
+    def download_file(self, peer_ip, peer_port, filename, retries=3, delay=2):
+        for attempt in range(retries):
+            try:
+                logging.info(f"Attempt {attempt + 1}: Connecting to {peer_ip}:{peer_port} for file '{filename}'.")
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as file_socket:
+                    file_socket.connect((peer_ip, int(peer_port)))
+                    logging.info(f"Connected to {peer_ip}:{peer_port}. Requesting file '{filename}'.")
+                    file_socket.send(f"REQUEST {filename}".encode())
+
+                    response = file_socket.recv(1024).decode().strip()
+                    logging.info(f"Received response from peer: {response}")
+
+                    if response.startswith("READY"):
+                        logging.info(f"Peer is ready. Starting download for '{filename}'.")
+                        file_path = os.path.join(self.local_files_dir, filename)
+                        with open(file_path, "wb") as file:
+                            while True:
+                                chunk = file_socket.recv(4096)
+                                if not chunk:
+                                    logging.info(f"Download completed for '{filename}'.")
+                                    break
+                                file.write(chunk)
+                                logging.debug(f"Received chunk of size {len(chunk)} for '{filename}'.")
+                        print(Fore.GREEN + f"File '{filename}' downloaded successfully.")
+                        return
+                    elif response == "FILE_NOT_FOUND":
+                        logging.error(f"File '{filename}' not found on peer's system.")
+                        print(Fore.RED + f"File '{filename}' not found on peer's system.")
+                        return
+                    else:
+                        logging.warning(f"Unexpected response: {response}")
+            except ConnectionRefusedError:
+                logging.warning(f"Attempt {attempt + 1}: Connection refused by {peer_ip}:{peer_port}.")
+                time.sleep(delay)
+            except Exception as e:
+                logging.error(f"Error during attempt {attempt + 1} to download '{filename}': {e}")
+        logging.error(f"Failed to download '{filename}' after {retries} attempts.")
+        print(Fore.RED + f"Failed to download '{filename}' after {retries} attempts.")
 
     def wait_for_approval(self, peer_ip, peer_port, filename, timeout=60):
         start_time = time.time()
+        logging.info(f"Waiting for approval to download '{filename}' from {peer_ip}:{peer_port}.")
         while time.time() - start_time < timeout:
             try:
                 response = self.server_socket.recv(1024).decode()
-                if response == "READY":
-                    print(Fore.GREEN + f"Request approved. Downloading '{filename}'...")
-                    self.download_file(peer_ip, peer_port, filename)
-                    return
+                logging.info(f"Received response: {response}")
+                if response.startswith("READY"):
+                    ready_filename = response.split(" ", 1)[1]
+                    if ready_filename == filename:
+                        logging.info(f"Approval received for '{filename}'. Initiating download.")
+                        print(Fore.GREEN + f"Request approved. Downloading '{filename}'...")
+                        self.download_file(peer_ip, peer_port, filename)
+                        return
                 elif response == "DENIED":
+                    logging.warning(f"Request for '{filename}' was denied.")
                     print(Fore.RED + f"Request denied for '{filename}'.")
                     return
             except socket.timeout:
-                pass  # Keep waiting
+                logging.warning("Timeout while waiting for approval.")
+            except Exception as e:
+                logging.error(f"Error while waiting for approval for '{filename}': {e}")
+        logging.error(f"Request for '{filename}' timed out.")
         print(Fore.RED + "Request timed out.")
 
     def manage_requests(self):
-        self.server_socket.send(b"REQUEST_QUEUE")
-        response = self.server_socket.recv(4096).decode()
-        requests = json.loads(response)
+        try:
+            # Send request to the server for pending requests
+            self.server_socket.send(b"REQUEST_QUEUE")
+            response = self.server_socket.recv(4096).decode()
 
-        if not requests:
-            print(Fore.YELLOW + "No pending requests.")
-            input(Fore.YELLOW + "Press Enter to return to the menu...")
-            return
+            # Parse the response from the server
+            if not response.strip():
+                logging.info("No pending requests received.")
+                print(Fore.YELLOW + "No pending requests.")
+                input(Fore.YELLOW + "Press Enter to return to the menu...")
+                return
 
-        for idx, req in enumerate(requests, start=1):
-            print(Fore.CYAN + f"[{idx}] {req['requester']} requests '{req['filename']}'")
-        choice = input(Fore.CYAN + "Select a request to process (or 0 to cancel): ").strip()
+            try:
+                pending_requests = json.loads(response)  # Parse JSON response
+            except json.JSONDecodeError:
+                logging.error("Failed to decode server response. Possibly corrupted or empty.")
+                print(Fore.RED + "Error decoding server response. Try again later.")
+                input(Fore.YELLOW + "Press Enter to return to the menu...")
+                return
 
-        if choice.isdigit() and int(choice) > 0 and int(choice) <= len(requests):
-            selected_request = requests[int(choice) - 1]
-            approve = input(Fore.CYAN + f"Approve request for '{selected_request['filename']}'? (y/n): ").strip().lower()
-            if approve == "y":
-                self.server_socket.send(f"APPROVE {selected_request['requester']} {selected_request['filename']}".encode())
-                print(Fore.GREEN + "Request approved.")
+            if not pending_requests:
+                logging.info("No pending requests found.")
+                print(Fore.YELLOW + "No pending requests.")
+                input(Fore.YELLOW + "Press Enter to return to the menu...")
+                return
+
+            # Display pending requests
+            print(Fore.CYAN + "Pending Requests:")
+            for idx, req in enumerate(pending_requests, start=1):
+                print(Fore.CYAN + f"[{idx}] {req['requester']} requests '{req['filename']}'")
+
+            choice = input(Fore.CYAN + "Select a request to process (or 0 to cancel): ").strip()
+
+            if choice.isdigit() and int(choice) > 0 and int(choice) <= len(pending_requests):
+                selected_request = pending_requests[int(choice) - 1]
+                approve = input(Fore.CYAN + f"Approve request for '{selected_request['filename']}'? (y/n): ").strip().lower()
+                if approve == "y":
+                    self.server_socket.send(
+                        f"APPROVE_REQUEST {selected_request['filename']} {selected_request['requester']}".encode()
+                    )
+                    print(Fore.GREEN + "Request approved.")
+                else:
+                    self.server_socket.send(
+                        f"DENY_REQUEST {selected_request['filename']} {selected_request['requester']}".encode()
+                    )
+                    print(Fore.RED + "Request denied.")
+
             else:
-                self.server_socket.send(f"DENY {selected_request['requester']} {selected_request['filename']}".encode())
-                print(Fore.RED + "Request denied.")
-        else:
-            print(Fore.YELLOW + "No request selected.")
-        input(Fore.YELLOW + "Press Enter to return to the menu...")
+                print(Fore.YELLOW + "No valid request selected.")
+            input(Fore.YELLOW + "Press Enter to return to the menu...")
+
+        except Exception as e:
+            logging.error(f"Error in manage_requests: {e}")
+            print(Fore.RED + f"An error occurred: {e}")
+            input(Fore.YELLOW + "Press Enter to return to the menu...")
 
     def serve_file(self, client_socket):
         try:
-            # Receive command and filename from the client
             data = client_socket.recv(1024).decode()
+            logging.info(f"Received command: {data}")
             command, filename = data.split()
 
             if command == "REQUEST":
                 file_path = os.path.join(self.local_files_dir, filename)
-
-                # Check if the requested file exists
                 if not os.path.exists(file_path):
+                    logging.warning(f"Requested file '{filename}' not found.")
                     client_socket.send(b"FILE_NOT_FOUND")
-                    print(Fore.RED + f"File '{filename}' not found for transfer.")
                     return
 
-                print(Fore.YELLOW + f"Incoming request for '{filename}' from {client_socket.getpeername()}.")
-
-                # Confirm file transfer
-                confirm = input(Fore.CYAN + f"Allow transfer of '{filename}'? (y/n): ").strip().lower()
-                if confirm != 'y':
-                    client_socket.send(b"REQUEST_DENIED")
-                    print(Fore.RED + f"Transfer of '{filename}' denied.")
-                    return
-
-                # Encrypt the file
-                aes_key = generate_AES_key()
-                encrypted_file_path = aes_encrypt_file(file_path, aes_key)
-
-                # Assume the peer's public key is available for encryption
-                peer_public_key = self.peer_public_key  # Ensure this is defined elsewhere in the class
-                aes_key_encrypted = rsa_encrypt(aes_key, peer_public_key)
-
-                # Send READY signal and encrypted AES key
+                logging.info(f"Preparing to serve file '{filename}'.")
                 client_socket.send(b"READY")
-                client_socket.send(aes_key_encrypted)
 
-                # Send the encrypted file in chunks
-                with open(encrypted_file_path, "rb") as file:
-                    print(Fore.GREEN + f"Sending file '{filename}'...")
+                with open(file_path, "rb") as file:
                     while chunk := file.read(4096):
                         client_socket.send(chunk)
-                    print(Fore.CYAN + f"File '{filename}' sent successfully.")
+                        logging.debug(f"Sent chunk of size {len(chunk)} for '{filename}'.")
+                logging.info(f"File '{filename}' sent successfully.")
             else:
-                print(Fore.RED + f"Invalid command received: {command}")
+                logging.warning(f"Invalid command received: {command}.")
                 client_socket.send(b"INVALID_COMMAND")
         except Exception as e:
-            print(Fore.RED + f"Error during file transfer: {e}")
+            logging.error(f"Error during serve_file: {e}")
         finally:
             client_socket.close()
 
@@ -440,7 +589,7 @@ class Client:
 
                     selected_file = info["files"][file_choice]
                     print(Fore.YELLOW + f"Requesting file '{selected_file}' from {username}...")
-                    self.request_file(info["address"], 5000, selected_file)  # Adjust port if needed
+                    self.request_file(info["address"], info["port"], selected_file)
                     input(Fore.GREEN + "Press Enter to return to the file list...")
         except json.JSONDecodeError:
             print(Fore.RED + "Error decoding server response. The data might be corrupted.")
@@ -473,15 +622,32 @@ class Client:
     def start_peer_listener(self):
         try:
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.bind((self.server_ip, self.server_port))
+            while True:
+                try:
+                    # Bind to a random port in the range 50000-65535
+                    port = random.randint(50000, 65535)
+                    server_socket.bind((self.server_ip, port))
+                    self.peer_port = port
+                    break
+                except OSError:
+                    continue  # Retry with a different port
+
             server_socket.listen(5)
-            print(Fore.GREEN + f"Peer listening on {self.server_ip}:{self.server_port}...")
+            logging.info(f"Peer listener running on {self.server_ip}:{self.peer_port}")
+
+            # Notify server about the new port
+            self.server_socket.send(f"UPDATE_PORT {self.username} {self.peer_port}".encode())
+            response = self.server_socket.recv(1024).decode()
+            if response != "PORT_UPDATED":
+                logging.error("Server failed to update peer port.")
+                return
+
             while True:
                 client_socket, client_address = server_socket.accept()
-                print(Fore.CYAN + f"Connection received from {client_address}")
+                logging.info(f"Connection received from {client_address}")
                 threading.Thread(target=self.serve_file, args=(client_socket,), daemon=True).start()
         except Exception as e:
-            print(Fore.RED + f"Error starting peer listener: {e}")
+            logging.error(f"Error starting peer listener: {e}")
 
     def view_pending_requests(self):
         try:
@@ -536,9 +702,12 @@ class Client:
 
         
     def main_menu(self):
+        self.select_signature_algorithm()
         self.connect_to_server()
         self.ensure_login()
-        threading.Thread(target=self.start_peer_listener, daemon=True).start()  # Start serving files in the background
+        
+        # Start peer listener
+        threading.Thread(target=self.start_peer_listener, daemon=True).start()
 
         while True:
             self.clear_screen()

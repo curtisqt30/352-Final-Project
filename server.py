@@ -4,6 +4,7 @@ import json
 import ssl
 import traceback
 import os
+import base64
 import logging
 from Crypto.PublicKey import RSA
 from cryptography import x509
@@ -14,16 +15,26 @@ import datetime
 import ipaddress
 from util import (
     hash_file,
-    generate_AES_key,
     aes_encrypt_file,
     aes_decrypt_file,
-    sign_data_rsa,
-    verify_signature_rsa,
+    generate_AES_key,
     store_password,
     load_stored_password,
     verify_password,
+    load_json,
+    save_json,
     load_database,
     save_database,
+    generate_RSA_keypair,
+    rsa_encrypt,
+    rsa_decrypt,
+    sign_data_rsa,
+    verify_signature_rsa,
+    sign_data_dsa,
+    generate_DSA_keypair,
+    verify_signature_dsa,
+    save_key,
+    load_key,
 )
 
 # Set up logging
@@ -38,7 +49,7 @@ database = load_database()
 database_lock = threading.Lock()
 
 # Store Requests
-pending_requests = {}  # {"username": [{"filename": ..., "requester": ..., "ip": ..., "port": ...}]}
+pending_requests = {} 
 pending_requests_lock = threading.Lock()
 
 # request queue
@@ -48,6 +59,8 @@ request_queue_lock = threading.Lock()
 # Track active peers
 active_peers = {}
 active_peers_lock = threading.Lock()
+peer_sockets = {}
+peer_sockets_lock = threading.Lock()
 
 # Data structure for tracking login attempts
 login_attempts = {}
@@ -66,15 +79,23 @@ def handle_client(client_socket, client_address):
 
             command, *args = data.split()
             if command == "REGISTER":
-                if len(args) != 2:
-                    client_socket.send(b"INVALID_ARGS")
-                    continue
-                username, password = args
-                if load_stored_password(username):
-                    client_socket.send(b"USERNAME_TAKEN")
-                else:
-                    store_password(username, password)
-                    client_socket.send(b"REGISTER_SUCCESS")
+                try:
+                    username, password, client_data = args[0], args[1], json.loads(args[2])
+                    algorithm = client_data["algorithm"]
+                    public_key = client_data["public_key"]
+
+                    if username in database["users"]:
+                        client_socket.send(b"USERNAME_TAKEN")
+                    else:
+                        store_password(username, password)
+                        database["users"][username] = {
+                            "algorithm": algorithm,
+                            "public_key": public_key
+                        }
+                        save_database(database)
+                        client_socket.send(b"REGISTER_SUCCESS")
+                except Exception as e:
+                        client_socket.send(b"REGISTER_FAILURE")
 
             elif command == "LOGIN":
                 if len(args) != 2:
@@ -83,66 +104,83 @@ def handle_client(client_socket, client_address):
                 username, password = args
 
                 if verify_password(username, password):
-                    client_socket.send(b"LOGIN_SUCCESS")
                     with active_peers_lock:
                         active_peers[username] = {
                             "address": client_address[0],
                             "files": [],
                         }
+                    with peer_sockets_lock:  # Use the lock here
+                        peer_sockets[username] = client_socket
+                    client_socket.send(b"LOGIN_SUCCESS")
                     logging.info(f"User '{username}' logged in successfully.")
-                    with login_attempts_lock:
-                        login_attempts.pop(client_address[0], None)
                 else:
                     client_socket.send(b"LOGIN_FAILURE")
-                    logging.warning(f"Failed login attempt for user '{username}' from {client_address[0]}")
-                    with login_attempts_lock:
-                        login_attempts[client_address[0]] = login_attempts.get(client_address[0], 0) + 1
 
             elif command == "LOGOUT":
                 if len(args) != 1:
                     client_socket.send(b"INVALID_ARGS")
                     continue
                 username = args[0]
-                with database_lock:
-                    # Remove all files indexed by this user
-                    database["file_index"] = {
-                        filename: metadata
-                        for filename, metadata in database["file_index"].items()
-                        if metadata["username"] != username
-                    }
-                    save_database(database)
+
                 with active_peers_lock:
                     if username in active_peers:
                         del active_peers[username]
-                logging.info(f"Active peers after logout: {active_peers}")
-                client_socket.send(b"LOGOUT_SUCCESS")
-                logging.info(f"User '{username}' logged out.")
+                with peer_sockets_lock:
+                    if username in peer_sockets:
+                        del peer_sockets[username]
 
-            elif command == "INDEX":
-                if len(args) != 5:
+                logging.info(f"User '{username}' logged out.")
+                client_socket.send(b"LOGOUT_SUCCESS")
+                
+            elif command == "UPDATE_PORT":
+                if len(args) != 2:
                     client_socket.send(b"INVALID_ARGS")
                     continue
-                username, filename, ip, port, file_hash = args
-                logging.info(f"INDEX command received for file: {filename}")
+                username, peer_port = args
+                with active_peers_lock:
+                    if username in active_peers:
+                        active_peers[username]["port"] = peer_port
+                        client_socket.send(b"PORT_UPDATED")
+                        logging.info(f"Updated port for {username}: {peer_port}")
+                    else:
+                        client_socket.send(b"USER_NOT_FOUND")
+
+            elif command == "INDEX":
                 try:
-                    # Sign the file hash
-                    signed_index = sign_data_rsa(file_hash.encode(), SERVER_PRIVATE_KEY)
-                    with database_lock:
+                    data = json.loads(args[0])
+                    username, filename, file_hash, aes_key, signature = (
+                        data["username"], data["filename"], data["file_hash"],
+                        base64.b64decode(data["aes_key"]),
+                        base64.b64decode(data["signature"])
+                    )
+
+                    user_info = database["users"].get(username)
+                    if not user_info:
+                        client_socket.send(b"USER_NOT_FOUND")
+                        return
+
+                    public_key = user_info["public_key"]
+                    algorithm = user_info["algorithm"]
+
+                    if algorithm == "RSA":
+                        verified = verify_signature_rsa(file_hash.encode(), signature, public_key)
+                    elif algorithm == "DSA":
+                        verified = verify_signature_dsa(file_hash.encode(), signature, public_key)
+                    else:
+                        verified = False
+
+                    if verified:
                         database["file_index"][filename] = {
                             "username": username,
-                            "ip": ip,
-                            "port": port,
-                            "hash": file_hash,
-                            "signature": signed_index.hex(),
+                            "file_hash": file_hash,
+                            "aes_key": base64.b64encode(aes_key).decode(),
+                            "signature": signature.hex()
                         }
                         save_database(database)
-                    with active_peers_lock:
-                        if username in active_peers:
-                            active_peers[username]["files"].append(filename)
-                    client_socket.send(b"INDEX_SUCCESS")
+                        client_socket.send(b"INDEX_SUCCESS")
+                    else:
+                        client_socket.send(b"SIGNATURE_INVALID")
                 except Exception as e:
-                    logging.error(f"Error handling INDEX command: {e}")
-                    traceback.print_exc()
                     client_socket.send(b"INDEX_FAILURE")
 
             elif command == "LIST_PEERS":
@@ -152,10 +190,14 @@ def handle_client(client_socket, client_address):
                 client_socket.send(response.encode())
 
             elif command == "FILE_REQUEST":
-                if len(args) != 3:
+                if len(args) != 3:  # Ensure the correct number of arguments
+                    logging.warning(f"Invalid FILE_REQUEST args: {args}")
                     client_socket.send(b"INVALID_ARGS")
                     continue
-                requester, filename, peer_ip = args
+
+                requester, filename, peer_ip = args  # Extract arguments
+
+                logging.info(f"Received FILE_REQUEST from {requester} for {filename}")
 
                 with database_lock:
                     file_info = database["file_index"].get(filename, None)
@@ -163,18 +205,24 @@ def handle_client(client_socket, client_address):
                 if file_info:
                     owner = file_info["username"]  # The owner of the file
 
-                    with pending_requests_lock:
-                        if owner not in pending_requests:
-                            pending_requests[owner] = []  # Initialize if not already present
-                        pending_requests[owner].append({
-                            "requester": requester,
-                            "filename": filename,
-                            "peer_ip": peer_ip,
-                            "peer_port": file_info["port"],
-                        })
+                    with active_peers_lock:
+                        if owner in active_peers:
+                            owner_port = active_peers[owner]["port"]  # Use the dynamically updated port
 
-                    client_socket.send(b"REQUEST_QUEUED")
-                    logging.info(f"File request for '{filename}' queued.")
+                            with pending_requests_lock:
+                                if owner not in pending_requests:
+                                    pending_requests[owner] = []  # Initialize if not already present
+                                pending_requests[owner].append({
+                                    "requester": requester,
+                                    "filename": filename,
+                                    "peer_ip": peer_ip,
+                                    "peer_port": owner_port,  # Use the correct port
+                                })
+
+                            client_socket.send(b"REQUEST_QUEUED")
+                            logging.info(f"File request for '{filename}' queued.")
+                        else:
+                            client_socket.send(b"OWNER_NOT_FOUND")
                 else:
                     client_socket.send(b"FILE_NOT_FOUND")
 
@@ -190,6 +238,22 @@ def handle_client(client_socket, client_address):
                     logging.error(f"Error handling REQUEST_QUEUE for {username}: {e}")
                     client_socket.send(b"[]")  # Send an empty list if there's an error
 
+            elif command == "REQUEST":
+                file_path = os.path.join(self.local_files_dir, filename)
+                if not os.path.exists(file_path):
+                    logging.warning(f"Requested file '{filename}' not found.")
+                    client_socket.send(b"FILE_NOT_FOUND")
+                    return
+
+                logging.info(f"Preparing to serve file '{filename}'.")
+                client_socket.send(b"READY")  # Ensure only 'READY' is sent without additional data
+
+                with open(file_path, "rb") as file:
+                    while chunk := file.read(4096):
+                        client_socket.send(chunk)
+                        logging.debug(f"Sent chunk of size {len(chunk)} for '{filename}'.")
+                logging.info(f"File '{filename}' sent successfully.")
+
             elif command == "APPROVE_REQUEST":
                 if len(args) != 2:
                     client_socket.send(b"INVALID_ARGS")
@@ -201,17 +265,43 @@ def handle_client(client_socket, client_address):
                     request = next((req for req in user_requests if req["filename"] == filename and req["requester"] == requester), None)
 
                     if request:
-                        # Notify the requester
-                        requester_socket = active_peers[requester]["socket"] 
-                        requester_socket.send(b"READY")
-                        # Remove the request from the queue
+                        with peer_sockets_lock:
+                            if requester in peer_sockets:
+                                try:
+                                    requester_socket = peer_sockets[requester]
+                                    requester_socket.send(f"READY {filename}".encode())  # Notify requester
+                                    logging.info(f"READY signal sent for '{filename}' to '{requester}'.")
+                                except Exception as e:
+                                    logging.error(f"Failed to notify requester '{requester}': {e}")
+                                    client_socket.send(b"NOTIFY_FAILURE")
+                                    return
+                        # Remove the processed request
                         pending_requests[username] = [req for req in user_requests if req != request]
                         client_socket.send(b"REQUEST_APPROVED")
-                        logging.info(f"Request for '{filename}' from {requester} approved by {username}.")
                     else:
                         client_socket.send(b"REQUEST_NOT_FOUND")
-                        logging.warning(f"No matching request found for '{filename}' from '{requester}'.")
 
+            elif command == "DENY_REQUEST":
+                if len(args) != 2:
+                    client_socket.send(b"INVALID_ARGS")
+                    continue
+                filename, requester = args
+
+                with pending_requests_lock:
+                    user_requests = pending_requests.get(username, [])
+                    request = next((req for req in user_requests if req["filename"] == filename and req["requester"] == requester), None)
+
+                    if request:
+                        with peer_sockets_lock:
+                            if requester in peer_sockets:
+                                requester_socket = peer_sockets[requester]
+                                requester_socket.send(b"DENIED")
+                        # Remove the denied request
+                        pending_requests[username] = [req for req in user_requests if req != request]
+                        client_socket.send(b"REQUEST_DENIED")
+                    else:
+                        client_socket.send(b"REQUEST_NOT_FOUND")
+                        
             elif command == "SEARCH":
                 if len(args) != 1:
                     client_socket.send(b"INVALID_ARGS")

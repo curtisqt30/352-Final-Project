@@ -205,26 +205,54 @@ def verify_signature_rsa(data, signature, public_key):
 
 # DSA Functions
 def generate_DSA_keypair(key_size=2048):
-    pass
+    key = DSA.generate(key_size)
+    return key, key.publickey()
 
 def sign_data_dsa(data, private_key):
-    pass
+    try:
+        if not isinstance(data, bytes):
+            data = data.encode('utf-8')
+        hash_obj = SHA256.new(data)
+        signer = DSS.new(private_key, 'fips-186-3')
+        signature = signer.sign(hash_obj)
+        return signature
+    except Exception as e:
+        raise ValueError(f"DSA signing failed: {e}")
 
 def verify_signature_dsa(data, signature, public_key):
-    pass
+    try:
+        if not isinstance(data, bytes):
+            data = data.encode('utf-8')
+        hash_obj = SHA256.new(data)
+        verifier = DSS.new(public_key, 'fips-186-3')
+        verifier.verify(hash_obj, signature)
+        return True
+    except ValueError:
+        return False
+    except Exception as e:
+        raise ValueError(f"DSA verification failed: {e}")
 
 # Key Storage functions
 def save_key(key, file_path="keys.json"):
     data = load_json(file_path) or {}
-    data[file_path] = base64.b64encode(key).decode('utf-8')  # Save as base64 string
+    data[file_path] = base64.b64encode(key).decode('utf-8')
     
     save_json(data, file_path)
 
-def load_key(file_path="keys.json"):
-    data = load_json(file_path)
-    if data and file_path in data:
-        return base64.b64decode(data[file_path])
-    return None
+def load_key(file_path):
+    try:
+        with open(file_path, "rb") as key_file:
+            key_data = key_file.read()
+            if b"RSA PRIVATE" in key_data:
+                return RSA.import_key(key_data)
+            elif b"DSA PRIVATE" in key_data:
+                return DSA.import_key(key_data)
+            else:
+                raise ValueError("Unsupported key format.")
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        return None
 
 def get_current_timestamp():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
